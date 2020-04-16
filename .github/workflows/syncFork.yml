@@ -1,7 +1,7 @@
 name: SyncFork
 on:
   schedule:
-    - cron:  '* 15 * * *'
+    - cron:  '30 15 * * *'
 jobs:
   syncFork:
     runs-on: ubuntu-latest
