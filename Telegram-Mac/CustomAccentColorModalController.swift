@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 private final class CustomAccentColorView : View {
     private let tableView: TableView = TableView(frame: NSZeroRect)
@@ -20,7 +21,7 @@ private final class CustomAccentColorView : View {
     private let context: AccountContext
     fileprivate var disableTint: Bool = false {
         didSet {
-            colorPicker.colorChanged?(colorPicker.colorPicker.color)
+            //colorPicker.colorChanged?(colorPicker.colorPicker.color)
         }
     }
     required init(frame frameRect: NSRect, theme: TelegramPresentationTheme, context: AccountContext) {
@@ -30,31 +31,57 @@ private final class CustomAccentColorView : View {
         self.addSubview(colorPicker)
         self.addSubview(tintedCheckbox)
         colorPicker.colorPicker.color = theme.colors.accent
-        colorPicker.defaultColor = colorPicker.colorPicker.color
+      //  colorPicker.defaultColor = colorPicker.colorPicker.color
         tintedCheckbox.update(by: nil)
         tintedCheckbox.isSelected = theme.colors.tinted
         tintedCheckbox.isHidden = true//!theme.colors.tinted || !theme.bubbled
         colorPicker.colorPicker.colorChanged = { [weak self] color in
             guard let `self` = self else {return}
-            self.colorPicker.textView.setString(color.hexString)
+            self.colorPicker.updateMode(.single(color), animated: true)
         }
         
+        self.colorPicker.updateMode(.single(theme.colors.accent), animated: true)
+
+
         tintedCheckbox.onChangedValue = { [weak self] value in
             self?.disableTint = !value
         }
-        
+
         colorPicker.colorChanged = { [weak self] color in
             guard let `self` = self else {return}
-            self.colorPicker.colorPicker.color = color
-            self.colorPicker.colorPicker.needsLayout = true
-            let colors = theme.colors.withoutAccentColor().withAccentColor(color, disableTint: self.disableTint)
-            let newTheme = theme.withUpdatedColors(colors)
-            self.addTableItems(self.context, theme: newTheme)
-            self.tableView.updateLocalizationAndTheme(theme: newTheme)
-            self.controller?.updateLocalizationAndTheme(theme: newTheme)
-            self.colorPicker.updateLocalizationAndTheme(theme: newTheme)
-            self.tintedCheckbox.update(by: nil)
+            
+            switch color {
+            case let .single(color):
+                self.colorPicker.colorPicker.color = color
+                self.colorPicker.colorPicker.needsLayout = true
+                let colors = theme.colors.withoutAccentColor().withAccentColor(PaletteAccentColor(color), disableTint: self.disableTint)
+                let newTheme = theme.withUpdatedColors(colors)
+                self.addTableItems(self.context, theme: newTheme)
+                self.tableView.updateLocalizationAndTheme(theme: newTheme)
+                self.controller?.updateLocalizationAndTheme(theme: newTheme)
+                self.colorPicker.updateLocalizationAndTheme(theme: newTheme)
+                self.tintedCheckbox.update(by: nil)
+                self.colorPicker.updateMode(.single(color), animated: true)
+            default:
+                break
+            }
+            
+           
         }
+        
+
+        
+        tableView.addScroll(listener: TableScrollListener(dispatchWhenVisibleRangeUpdated: false, { [weak self] position in
+            guard let `self` = self else {
+                return
+            }
+            self.tableView.enumerateVisibleViews(with: { view in
+                if let view = view as? ChatRowView {
+                    view.updateBackground(animated: false)
+                }
+            })
+        }))
+        
         layout()
     }
     
@@ -76,9 +103,21 @@ private final class CustomAccentColorView : View {
         
         tableView.removeAll()
         
+        self.tableView.getBackgroundColor = {
+            theme.colors.chatBackground
+        }
+        
         _ = tableView.addItem(item: GeneralRowItem(frame.size, height: 10, stableId: arc4random(), backgroundColor: theme.chatBackground))
         
         let chatInteraction = ChatInteraction(chatLocation: .peer(PeerId(0)), context: context, disableSelectAbility: true)
+        
+        chatInteraction.getGradientOffsetRect = { [weak self] in
+            guard let `self` = self else {
+                return .zero
+            }
+            let offset = self.tableView.scrollPosition().current.rect.origin
+            return CGRect(origin: offset, size: self.tableView.frame.size)
+        }
         
         let fromUser1 = TelegramUser(id: PeerId(1), accessHash: nil, firstName: L10n.appearanceSettingsChatPreviewUserName1, lastName: "", username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [])
         
@@ -90,11 +129,11 @@ private final class CustomAccentColorView : View {
         
         let firstMessage = Message(stableId: 0, stableVersion: 0, id: MessageId(peerId: fromUser1.id, namespace: 0, id: 0), globallyUniqueId: 0, groupingKey: 0, groupInfo: nil, timestamp: 60 * 20 + 60*60*18, flags: [.Incoming], tags: [], globalTags: [], localTags: [], forwardInfo: nil, author: fromUser2, text: tr(L10n.appearanceSettingsChatPreviewFirstText), attributes: [ReplyMessageAttribute(messageId: replyMessage.id)], media: [], peers:SimpleDictionary([fromUser2.id : fromUser2, fromUser1.id : fromUser1]) , associatedMessages: SimpleDictionary([replyMessage.id : replyMessage]), associatedMessageIds: [])
         
-        let firstEntry: ChatHistoryEntry = .MessageEntry(firstMessage, MessageIndex(firstMessage), true, theme.bubbled ? .bubble : .list, .Full(rank: nil), nil, nil, nil, AutoplayMediaPreferences.defaultSettings)
+        let firstEntry: ChatHistoryEntry = .MessageEntry(firstMessage, MessageIndex(firstMessage), true, theme.bubbled ? .bubble : .list, .Full(rank: nil), nil, ChatHistoryEntryData(nil, MessageEntryAdditionalData(), AutoplayMediaPreferences.defaultSettings))
         
         let secondMessage = Message(stableId: 1, stableVersion: 0, id: MessageId(peerId: fromUser1.id, namespace: 0, id: 1), globallyUniqueId: 0, groupingKey: 0, groupInfo: nil, timestamp: 60 * 22 + 60*60*18, flags: [], tags: [], globalTags: [], localTags: [], forwardInfo: nil, author: fromUser1, text: L10n.appearanceSettingsChatPreviewSecondText, attributes: [], media: [], peers:SimpleDictionary([fromUser2.id : fromUser2, fromUser1.id : fromUser1]) , associatedMessages: SimpleDictionary(), associatedMessageIds: [])
         
-        let secondEntry: ChatHistoryEntry = .MessageEntry(secondMessage, MessageIndex(secondMessage), true, theme.bubbled ? .bubble : .list, .Full(rank: nil), nil, nil, nil, AutoplayMediaPreferences.defaultSettings)
+        let secondEntry: ChatHistoryEntry = .MessageEntry(secondMessage, MessageIndex(secondMessage), true, theme.bubbled ? .bubble : .list, .Full(rank: nil), nil, ChatHistoryEntryData(nil, MessageEntryAdditionalData(), AutoplayMediaPreferences.defaultSettings))
         
         
         let item1 = ChatRowItem.item(frame.size, from: firstEntry, interaction: chatInteraction, theme: theme)
@@ -119,8 +158,10 @@ private final class CustomAccentColorView : View {
 class CustomAccentColorModalController: ModalViewController {
 
     private let context: AccountContext
-    init(context: AccountContext) {
+    private let updateColor: (PaletteAccentColor)->Void
+    init(context: AccountContext, updateColor: @escaping(PaletteAccentColor)->Void) {
         self.context = context
+        self.updateColor = updateColor
         super.init(frame: NSMakeRect(0, 0, 350, 370))
         self.bar = .init(height: 0)
     }
@@ -149,18 +190,8 @@ class CustomAccentColorModalController: ModalViewController {
     }
     
     private func saveAccent() {
-        
-        
         let color = genericView.colorPicker.colorPicker.color
-        let context = self.context
-        let disableTint = self.genericView.disableTint
-        _ = updateThemeInteractivetly(accountManager: context.sharedContext.accountManager, f: { settings in
-            if color == theme.colors.basicAccent {
-                return settings.withUpdatedPalette(theme.colors.withoutAccentColor())
-            } else {
-                return settings.withUpdatedPalette(theme.colors.withoutAccentColor().withAccentColor(color, disableTint: disableTint))
-            }
-        }).start()
+        self.updateColor(PaletteAccentColor(color))
         
         delay(0.1, closure: { [weak self] in
            self?.close()
@@ -197,6 +228,6 @@ class CustomAccentColorModalController: ModalViewController {
     }
     
     override func firstResponder() -> NSResponder? {
-        return genericView.colorPicker.textView
+        return nil//genericView.colorPicker.textView
     }
 }

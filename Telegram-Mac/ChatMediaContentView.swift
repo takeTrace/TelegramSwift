@@ -7,11 +7,11 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import Lottie
 
 
 class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvider {
@@ -231,6 +231,12 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
     }
     
     override func mouseDown(with event: NSEvent) {
+        
+        if event.modifierFlags.contains(.control) {
+            super.mouseDown(with: event)
+            return
+        }
+        
         if userInteractionEnabled {
             inDragging = false
             dragpath = nil
@@ -322,6 +328,12 @@ class ChatMediaContentView: Control, NSDraggingSource, NSPasteboardItemDataProvi
     }
     
     override func mouseUp(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            super.mouseUp(with: event)
+            return
+        }
+        
+        
         if !inDragging && draggingAbility(event) && userInteractionEnabled, event.clickCount <= 1 {
             executeInteraction(false)
         } else {

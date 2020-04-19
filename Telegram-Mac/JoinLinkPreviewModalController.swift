@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 private class JoinLinkPreviewView : View {
     private let imageView:AvatarControl = AvatarControl(font: .avatar(.huge))
@@ -71,7 +72,7 @@ private class JoinLinkPreviewView : View {
                             if !layout.lines.isEmpty {
                                 let line = layout.lines[0]
                                // ctx.textMatrix = CGAffineTransform(scaleX: 1.0, y: -1.0)
-                                ctx.textPosition = NSMakePoint(floorToScreenPixels(scaleFactor: System.backingScale, (size.width - line.frame.width)/2.0) - 1, floorToScreenPixels(scaleFactor: System.backingScale, (size.height - line.frame.height)/2.0) + 4)
+                                ctx.textPosition = NSMakePoint(floorToScreenPixels(System.backingScale, (size.width - line.frame.width)/2.0) - 1, floorToScreenPixels(System.backingScale, (size.height - line.frame.height)/2.0) + 4)
                                 
                                 CTLineDraw(line.line, ctx)
                             }
@@ -173,7 +174,8 @@ class JoinLinkPreviewModalController: ModalViewController {
                     case .generic:
                         text = L10n.unknownError
                     case .tooMuchJoined:
-                        text = L10n.joinChannelsTooMuch
+                        showInactiveChannels(context: context, source: .join)
+                        return
                     }
                     alert(for: context.window, info: text)
                 })

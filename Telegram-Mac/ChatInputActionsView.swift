@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 
 //
@@ -50,6 +51,7 @@ class ChatInputActionsView: View, Notifable {
         slowModeTimeout.isHidden = true
         voice.autohighlight = false
         muteChannelMessages.autohighlight = false
+        send.autohighlight = false
         
         voice.set(handler: { [weak self] _ in
             guard let `self` = self else { return }
@@ -106,7 +108,7 @@ class ChatInputActionsView: View, Notifable {
     override func updateLocalizationAndTheme(theme: PresentationTheme) {
         super.updateLocalizationAndTheme(theme: theme)
         let theme = (theme as! TelegramPresentationTheme)
-        send.set(image: theme.icons.chatSendMessage, for: .Normal)
+        send.set(image: self.chatInteraction.presentation.state == .editing ? theme.icons.chatSaveEditedMessage : theme.icons.chatSendMessage, for: .Normal)
         _ = send.sizeToFit()
         voice.set(image: FastSettings.recordingState == .voice ? theme.icons.chatRecordVoice : theme.icons.chatRecordVideo, for: .Normal)
         _ = voice.sizeToFit()
@@ -211,7 +213,7 @@ class ChatInputActionsView: View, Notifable {
         
         if let scheduled = scheduled {
             if muteChannelMessages.isHidden {
-                scheduled.centerY(x: entertaiments.frame.minX - scheduled.frame.width)
+                scheduled.centerY(x: (keyboard.isHidden ? entertaiments.frame.minX : keyboard.frame.minX) - scheduled.frame.width)
             } else {
                 scheduled.centerY(x: muteChannelMessages.frame.minX - scheduled.frame.width - iconsInset)
             }
@@ -266,6 +268,9 @@ class ChatInputActionsView: View, Notifable {
                 if chatInteraction.peerId.namespace == Namespaces.Peer.SecretChat {
                     size.width += theme.icons.chatSecretTimer.backingSize.width + iconsInset
                 }
+                send.animates = false
+                send.set(image: value.state == .editing ? theme.icons.chatSaveEditedMessage : theme.icons.chatSendMessage, for: .Normal)
+                send.animates = true
               
                 if let peer = value.peer {
                     muteChannelMessages.isHidden = !peer.isChannel || !peer.canSendMessage || !value.effectiveInput.inputText.isEmpty || value.interfaceState.editState != nil
@@ -285,14 +290,13 @@ class ChatInputActionsView: View, Notifable {
                 }
                 
                 
-                
                 if let query = value.inputQueryResult, case .contextRequestResult = query, newInlineRequest || first {
                     newInlineRequest = true
                 } else {
                     newInlineRequest = false
                 }
                 
-                
+
                 
                 if let query = oldValue.inputQueryResult, case .contextRequestResult(_, let data) = query {
                     oldInlineLoading = data == nil
@@ -307,6 +311,10 @@ class ChatInputActionsView: View, Notifable {
                 } else {
                     oldInlineRequest = false
                 }
+                
+//                newInlineLoading = newInlineLoading && newInlineRequest
+//                oldInlineLoading = oldInlineLoading && oldInlineRequest
+
                 
                 let sNew = !value.effectiveInput.inputText.isEmpty || !value.interfaceState.forwardMessageIds.isEmpty || value.state == .editing
                 let sOld = !oldValue.effectiveInput.inputText.isEmpty || !oldValue.interfaceState.forwardMessageIds.isEmpty || oldValue.state == .editing
@@ -354,7 +362,7 @@ class ChatInputActionsView: View, Notifable {
                
                 if newInlineLoading {
                     if inlineProgress == nil {
-                        inlineProgress = ProgressIndicator(frame: NSMakeRect(0, 0, 26, 26))
+                        inlineProgress = ProgressIndicator(frame: NSMakeRect(0, 0, 22, 22))
                         inlineProgress?.progressColor = theme.colors.grayIcon
                         addSubview(inlineProgress!, positioned: .below, relativeTo: inlineCancel)
                         inlineProgress?.set(handler: { [weak self] _ in
@@ -461,7 +469,7 @@ class ChatInputActionsView: View, Notifable {
                 switch chatInteraction.mode {
                 case .history:
                     items.append(SPopoverItem(peer.id == chatInteraction.context.peerId ? L10n.chatSendSetReminder : L10n.chatSendScheduledMessage, {
-                        showModal(with: ScheduledMessageModalController(context: context, scheduleAt: { [weak chatInteraction] date in
+                        showModal(with: ScheduledMessageModalController(context: context, peerId: peer.id, scheduleAt: { [weak chatInteraction] date in
                             chatInteraction?.sendMessage(false, date)
                         }), for: context.window)
                     }))

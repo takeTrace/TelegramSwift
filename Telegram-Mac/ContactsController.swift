@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 
 private enum ContactsControllerEntryId: Hashable {
     case peerId(Int64)
@@ -267,7 +268,7 @@ class ContactsController: PeersListController {
         
     }
     
-    override func scrollup() {
+    override func scrollup(force: Bool = false) {
         genericView.tableView.scroll(to: .up(true))
     }
     
@@ -320,6 +321,13 @@ class ContactsController: PeersListController {
                     navigation.controller.invokeNavigation(action: modalAction)
                 }
             } else {
+                
+                let context = self.context
+                
+                _ = (context.globalPeerHandler.get() |> take(1)).start(next: { location in
+                    context.globalPeerHandler.set(.single(location))
+                })
+                
                 let chat:ChatController = ChatController(context: self.context, chatLocation: .peer(item.peer.id))
                 navigation.push(chat)
                 

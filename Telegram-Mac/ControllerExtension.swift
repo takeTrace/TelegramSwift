@@ -7,15 +7,15 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 
 class TelegramGenericViewController<T>: GenericViewController<T> where T:NSView {
 
     let context:AccountContext
-    let queue: Queue = Queue(name: "Controller Interface Queue", qos: DispatchQoS.default)
     private let languageDisposable:MetaDisposable = MetaDisposable()
     init(_ context:AccountContext) {
         self.context = context
@@ -33,7 +33,7 @@ class TelegramGenericViewController<T>: GenericViewController<T> where T:NSView 
     override func updateLocalizationAndTheme(theme: PresentationTheme) {
         super.updateLocalizationAndTheme(theme: theme)
         
-        self.genericView.background = theme.colors.background
+        (self.genericView as? AppearanceViewProtocol)?.updateLocalizationAndTheme(theme: theme)
         requestUpdateBackBar()
         requestUpdateCenterBar()
         requestUpdateRightBar()
@@ -62,7 +62,13 @@ class TableViewController: TelegramGenericViewController<TableView>, TableViewDe
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+        genericView.getBackgroundColor = {
+           return theme.colors.listBackground
+        }
+    }
+    
+    override func updateLocalizationAndTheme(theme: PresentationTheme) {
+        super.updateLocalizationAndTheme(theme: theme)
     }
     
     
@@ -171,10 +177,16 @@ class EditableViewController<T>: TelegramGenericViewController<T> where T: NSVie
         }, for:.Click)
     }
     
-    override init(_ context:AccountContext) {
-        super.init(context)
+    override func loadView() {
         editBar = TextButtonBarView(controller: self, text: "", style: navigationButtonStyle, alignment:.Right)
         addHandler()
+        rightBarView = editBar
+        updateEditStateTitles()
+        super.loadView()
+    }
+    
+    override init(_ context:AccountContext) {
+        super.init(context)
     }
 
     func update(with state:ViewControllerState) -> Void {
@@ -192,8 +204,7 @@ class EditableViewController<T>: TelegramGenericViewController<T> where T: NSVie
     override func updateNavigation(_ navigation: NavigationViewController?) {
         super.updateNavigation(navigation)
         if navigation != nil {
-            rightBarView = editBar
-            updateEditStateTitles()
+            
         }
     }
     
@@ -271,7 +282,7 @@ var appearanceSignal:Signal<Appearance, NoError> {
     }
 }
 
-struct AppearanceWrapperEntry<E>: Comparable, Identifiable where E: Comparable, E:Identifiable {
+final class AppearanceWrapperEntry<E>: Comparable, Identifiable where E: Comparable, E:Identifiable {
     let entry: E
     let appearance: Appearance
     init(entry: E, appearance: Appearance) {

@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
 
 
@@ -60,7 +61,7 @@ func createGroup(with context: AccountContext) {
         case .tooMuchJoined:
             text = L10n.channelErrorAddTooMuch
         }
-        alert(for: mainWindow, info: text)
+        alert(for: context.window, info: text)
     })
 }
 

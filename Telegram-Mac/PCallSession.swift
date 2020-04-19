@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
 
 enum CallTone {
@@ -210,7 +211,7 @@ class PCallSession {
     }
     
     func drop(_ reason:DropCallReason) {
-        account.callSessionManager.drop(internalId: id, reason: reason)
+        account.callSessionManager.drop(internalId: id, reason: reason, debugLog: .single(nil))
     }
     private func acceptAfterAccess() {
         callAcceptedTime = CFAbsoluteTimeGetCurrent()

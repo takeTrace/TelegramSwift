@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 private final class InstantViewArguments {
     let context: AccountContext
     let share:()->Void
@@ -253,7 +254,7 @@ class InstantViewController : TelegramGenericViewController<InstantWindowContent
         self.page = page
         
         let height = (screen.frame.height * 0.7)
-        let center = NSMakeRect(floorToScreenPixels(scaleFactor: System.backingScale, (screen.frame.width - 720)/2), floorToScreenPixels(scaleFactor: System.backingScale, (screen.frame.height - height)/2), 720, height)
+        let center = NSMakeRect(floorToScreenPixels(System.backingScale, (screen.frame.width - 720)/2), floorToScreenPixels(System.backingScale, (screen.frame.height - height)/2), 720, height)
         
         _window = Window(contentRect: center, styleMask: [.closable, .resizable, .miniaturizable, .fullSizeContentView, .titled, .unifiedTitleAndToolbar, .texturedBackground], backing: .buffered, defer: true)
         navigation = MajorNavigationController(ViewController.self, page, _window)
@@ -461,7 +462,7 @@ class InstantViewController : TelegramGenericViewController<InstantWindowContent
                 let values:[NSView] = [first, second, thrid].compactMap { $0 }
                 for i in 0 ..< min(values.count, xs.count) {
                     let view = values[i]
-                    view.setFrameOrigin(xs[i], floorToScreenPixels(scaleFactor: System.backingScale, (barHeight - view.frame.height)/2))
+                    view.setFrameOrigin(xs[i], floorToScreenPixels(System.backingScale, (barHeight - view.frame.height)/2))
                 }
             }
         }
@@ -522,3 +523,7 @@ func showInstantPage(_ page: InstantPageViewController) {
     }
 }
 
+func closeInstantView() {
+    instantController?.window?.orderOut(nil)
+    instantController = nil
+}

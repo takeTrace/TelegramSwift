@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 
 class MGalleryPhotoItem: MGalleryItem {
@@ -24,20 +25,20 @@ class MGalleryPhotoItem: MGalleryItem {
                 if case let .Loaded(content) = webpage.content, let image = content.image {
                     self.media = image
                 } else if case let .Loaded(content) = webpage.content, let media = content.file  {
-                    let represenatation = TelegramMediaImageRepresentation(dimensions: media.dimensions ?? NSZeroSize, resource: media.resource)
+                    let represenatation = TelegramMediaImageRepresentation(dimensions: media.dimensions ?? PixelDimensions(0, 0), resource: media.resource)
                     var representations = media.previewRepresentations
                     representations.append(represenatation)
-                    self.media = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: representations, immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                    self.media = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: representations, immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                     
                 } else {
                     fatalError("image for webpage not found")
                 }
             } else {
                 if let media = entry.message!.media[0] as? TelegramMediaFile {
-                    let represenatation = TelegramMediaImageRepresentation(dimensions: media.dimensions ?? NSZeroSize, resource: media.resource)
+                    let represenatation = TelegramMediaImageRepresentation(dimensions: media.dimensions ?? PixelDimensions(0, 0), resource: media.resource)
                     var representations = media.previewRepresentations
                     representations.append(represenatation)
-                    self.media = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: representations, immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                    self.media = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: representations, immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                 } else {
                     self.media = entry.message!.media[0] as! TelegramMediaImage
                 }
@@ -63,7 +64,7 @@ class MGalleryPhotoItem: MGalleryItem {
             if let modifiedSize = modifiedSize {
                 return modifiedSize.fitted(pagerSize)
             }
-            return largest.dimensions.fitted(pagerSize)
+            return largest.dimensions.size.fitted(pagerSize)
         }
         return NSZeroSize
     }
@@ -72,13 +73,13 @@ class MGalleryPhotoItem: MGalleryItem {
         if let largest = media.representations.last {
             if let modifiedSize = modifiedSize {
                 let lhsProportion = modifiedSize.width/modifiedSize.height
-                let rhsProportion = largest.dimensions.width/largest.dimensions.height
+                let rhsProportion = largest.dimensions.size.width/largest.dimensions.size.height
                 
                 if lhsProportion != rhsProportion {
                     return modifiedSize.fitted(size)
                 }
             }
-            return largest.dimensions.fitted(size)
+            return largest.dimensions.size.fitted(size)
         }
         return pagerSize
     }
@@ -104,8 +105,15 @@ class MGalleryPhotoItem: MGalleryItem {
                 return lhs == rhs
             })
             
+            
             let result = combineLatest(sizeValue, rotateValue) |> mapToSignal { [weak self] size, orientation -> Signal<(NSSize, ImageOrientation?), NoError> in
                 guard let `self` = self else {return .complete()}
+                
+                var size = size
+                if self.sizeValue.width > self.sizeValue.height && size.width < size.height
+                    || self.sizeValue.width < self.sizeValue.height && size.width > size.height {
+                    size = NSMakeSize(size.height, size.width)
+                }
                 
                 var newSize = self.smallestValue(for: size)
                 if let orientation = orientation {
@@ -115,20 +123,20 @@ class MGalleryPhotoItem: MGalleryItem {
                 }
                 return .single((newSize, orientation))
                 
-            } |> mapToSignal { size, orientation -> Signal<NSImage?, NoError> in
+            } |> mapToSignal { size, orientation -> Signal<(NSImage?, ImageOrientation?), NoError> in
                     return chatGalleryPhoto(account: context.account, imageReference: entry.imageReference(media), scale: System.backingScale, secureIdAccessContext: secureIdAccessContext, synchronousLoad: true)
                         |> map { transform in
                             let image = transform(TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets()))
                             if let orientation = orientation {
                                 let transformed = image?.createMatchingBackingDataWithImage(orienation: orientation)
                                 if let transformed = transformed {
-                                    return NSImage(cgImage: transformed, size: transformed.size)
+                                    return (NSImage(cgImage: transformed, size: transformed.size), orientation)
                                 }
                             }
                             if let image = image {
-                                return NSImage(cgImage: image, size: image.size)
+                                return (NSImage(cgImage: image, size: image.size), orientation)
                             } else {
-                                return nil
+                                return (nil, orientation)
                             }
                     }
             }
@@ -140,7 +148,7 @@ class MGalleryPhotoItem: MGalleryItem {
                 return .never()
             })
             
-            self.image.set(result |> map { .image($0) } |> deliverOnMainQueue)
+            self.image.set(result |> map { .image($0.0, $0.1) } |> deliverOnMainQueue)
             
             
             fetch()

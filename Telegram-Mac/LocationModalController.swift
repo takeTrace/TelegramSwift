@@ -9,10 +9,11 @@
 import Cocoa
 import TGUIKit
 import MapKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
-import MtProtoKitMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
+
 
 
 private enum PickLocationState : Equatable {
@@ -50,7 +51,7 @@ private final class LocationPinView : View {
         let theme = (theme as! TelegramPresentationTheme)
         locationPin.image = theme.icons.locationMapPin
         locationPin.sizeToFit()
-        dotView.backgroundColor = theme.colors.blueIcon
+        dotView.backgroundColor = theme.colors.accentIcon
     }
     
     override func layout() {
@@ -661,8 +662,6 @@ class LocationModalController: ModalViewController {
             })
             self.readyOnce()
         }))
-        
-        
         
     }
     

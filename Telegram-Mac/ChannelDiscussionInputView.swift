@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 class ChannelDiscussionInputView: View {
     private let leftButton: TitleButton = TitleButton()
@@ -39,7 +40,7 @@ class ChannelDiscussionInputView: View {
         
         leftButton.removeAllHandlers()
         leftButton.set(handler: { [weak chatInteraction] _ in
-            chatInteraction?.toggleNotifications()
+            chatInteraction?.toggleNotifications(nil)
         }, for: .Click)
         
         rightButton.removeAllHandlers()

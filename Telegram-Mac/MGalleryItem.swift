@@ -7,20 +7,20 @@
 //
 
 import Cocoa
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 import TGUIKit
-import Lottie
 
 
 enum GPreviewValue {
-    case image(NSImage?)
+    case image(NSImage?, ImageOrientation?)
     case view(NSView?)
     
     var hasValue: Bool {
         switch self {
-        case let .image(img):
+        case let .image(img, _):
             return img != nil
         case let .view(view):
             return view != nil
@@ -28,16 +28,25 @@ enum GPreviewValue {
     }
     var size: NSSize? {
         switch self {
-        case let .image(img):
+        case let .image(img, _):
             return img?.size
         case let .view(view):
             return view?.frame.size
         }
     }
     
+    var rotation: ImageOrientation? {
+        switch self {
+        case let .image(_, rotation):
+            return rotation
+        case .view:
+            return nil
+        }
+    }
+    
     var image: NSImage? {
         switch self {
-        case let .image(img):
+        case let .image(img, _):
             return img
         case .view:
             return nil
@@ -71,12 +80,6 @@ func <(lhs: GalleryEntry, rhs: GalleryEntry) -> Bool {
         } else {
             return false
         }
-    case .lottie(_, let lhsEntry):
-        if case let .lottie(_, rhsEntry) = rhs {
-            return lhsEntry < rhsEntry
-        } else {
-            return false
-        }
     }
 }
 
@@ -106,12 +109,6 @@ func ==(lhs: GalleryEntry, rhs: GalleryEntry) -> Bool {
         } else {
             return false
         }
-    case let .lottie(_, lhsEntry):
-        if case .lottie(_, let rhsEntry) = rhs {
-            return lhsEntry.stableId == rhsEntry.stableId
-        } else {
-            return false
-        }
     }
 }
 enum GalleryEntry : Comparable, Identifiable {
@@ -119,7 +116,6 @@ enum GalleryEntry : Comparable, Identifiable {
     case photo(index:Int, stableId:AnyHashable, photo:TelegramMediaImage, reference: TelegramMediaImageReference?, peer: Peer, message: Message?, date: TimeInterval)
     case instantMedia(InstantPageMedia, Message?)
     case secureIdDocument(SecureIdDocumentValue, Int)
-    case lottie(Animation, ChatHistoryEntry)
     var stableId: AnyHashable {
         switch self {
         case let .message(entry):
@@ -130,13 +126,11 @@ enum GalleryEntry : Comparable, Identifiable {
             return media.index
         case let .secureIdDocument(document, _):
             return document.stableId
-        case let .lottie(_, entry):
-            return entry.stableId
         }
     }
     
     var canShare: Bool {
-        return message != nil && !message!.isScheduledMessage
+        return message != nil && !message!.isScheduledMessage && !message!.containsSecretMedia
     }
     
     var interfaceState:(PeerId, TimeInterval)? {
@@ -172,17 +166,6 @@ enum GalleryEntry : Comparable, Identifiable {
             }
         case .instantMedia(let media, _):
             return media.media as? TelegramMediaFile
-        case let .lottie(_, entry):
-            if let media = entry.message!.media[0] as? TelegramMediaFile {
-                return media
-            } else if let media = entry.message!.media[0] as? TelegramMediaWebpage {
-                switch media.content {
-                case let .Loaded(content):
-                    return content.file
-                default:
-                    return nil
-                }
-            }
         default:
             return nil
         }
@@ -211,15 +194,22 @@ enum GalleryEntry : Comparable, Identifiable {
             return ImageMediaReference.standalone(media: image)
         case .photo:
             return ImageMediaReference.standalone(media: image)
-        case .lottie:
-            preconditionFailure()
+        }
+    }
+    
+    var peer: Peer? {
+        switch self {
+        case let .photo(_, _, _, _, peer, _, _):
+            return peer
+        default:
+            return nil
         }
     }
     
     func peerPhotoResource() -> MediaResourceReference {
         switch self {
         case let .photo(_, _, image, _, peer, message, _):
-            if let representation = image.representationForDisplayAtSize(NSMakeSize(1280, 1280)) {
+            if let representation = image.representationForDisplayAtSize(PixelDimensions(1280, 1280)) {
                 if let message = message {
                     return .media(media: .message(message: MessageReference(message), media: image), resource: representation.resource)
                 }
@@ -246,8 +236,6 @@ enum GalleryEntry : Comparable, Identifiable {
             return FileMediaReference.standalone(media: file)
         case .photo:
             return FileMediaReference.standalone(media: file)
-        case .lottie:
-            preconditionFailure()
         }
     }
     
@@ -262,16 +250,12 @@ enum GalleryEntry : Comparable, Identifiable {
             return "\(stableId)"
         case let .secureIdDocument(document, _):
             return "secureId: \(document.document.id.hashValue)"
-        case let .lottie(_, entry):
-            return "lottie-animation-\(entry.message?.stableId ?? 0)"
         }
     }
     
     var chatEntry: ChatHistoryEntry? {
         switch self {
         case let .message(entry):
-            return entry
-        case let .lottie(_, entry):
             return entry
         default:
             return nil
@@ -416,13 +400,30 @@ class MGalleryItem: NSObject, Comparable, Identifiable {
             let attr = NSMutableAttributedString()
             _ = attr.append(string: caption.prefixWithDots(255), color: .white, font: .normal(.text))
             
-//            attr.detectLinks(type: [.Links, .Mentions], account: account, color: .linkColor, openInfo: { peerId, _, _, _ in
-//                context.sharedContext.bindings.rootNavigation().push(PeerInfoController.init(account: account, peerId: peerId))
-//                viewer?.close()
-//            }, hashtag: { _ in }, command: {_ in }, applyProxy: { _ in })
+            attr.detectLinks(type: [.Links, .Mentions], context: context, color: .linkColor, openInfo: { peerId, toChat, postId, action in
+                let navigation = context.sharedContext.bindings.rootNavigation()
+                let controller = navigation.controller
+                if toChat {
+                    if peerId == (controller as? ChatController)?.chatInteraction.peerId {
+                        if let postId = postId {
+                            (controller as? ChatController)?.chatInteraction.focusMessageId(nil, postId, TableScrollState.center(id: 0, innerId: nil, animated: true, focus: .init(focus: true), inset: 0))
+                        }
+                    } else {
+                        navigation.push(ChatAdditionController(context: context, chatLocation: .peer(peerId), messageId: postId, initialAction: action))
+                    }
+                } else {
+                    navigation.push(PeerInfoController(context: context, peerId: peerId))
+                }
+                viewer?.close()
+            }, hashtag: { _ in }, command: {_ in }, applyProxy: { _ in })
             
             self.caption = TextViewLayout(attr, alignment: .center)
-            self.caption?.interactions = globalLinkExecutor
+            self.caption?.interactions = TextViewInteractions(processURL: { link in
+                if let link = link as? inAppLink {
+                    execute(inapp: link)
+                    viewer?.close()
+                }
+            })
 
             
             self.caption?.measure(width: pagerSize.width - 200)
@@ -442,11 +443,10 @@ class MGalleryItem: NSObject, Comparable, Identifiable {
                 view.layer?.animateContents()
             }
             self.disableAnimations = false
-            first = false
             view.layer?.backgroundColor = self.backgroundColor.cgColor
 
             if let magnify = view.superview?.superview as? MagnifyView {
-                if let size = value.size, size.width - size.height != self.sizeValue.width - self.sizeValue.height, size.width > 150 && size.height > 150, magnify.magnify == 1.0 {
+                if let size = value.size, size.width - size.height != self.sizeValue.width - self.sizeValue.height, size.width > 150 && size.height > 150, magnify.magnify == 1.0, first {
                     self.modifiedSize = size
                     if magnify.contentSize != self.sizeValue {
                         magnify.contentSize = self.sizeValue
@@ -455,11 +455,25 @@ class MGalleryItem: NSObject, Comparable, Identifiable {
                         magnify.contentSize = size
                     }
                 } else {
-                    let size = magnify.contentSize
+                    var size = magnify.contentSize
+                    if self is MGalleryPhotoItem || self is MGalleryPeerPhotoItem, !first {
+                      //  if magnify.magnify > 1 {
+                        if value.rotation == nil {
+                            size = value.size?.aspectFitted(size) ?? size
+                        } else {
+                            size = value.size ?? size
+                        }
+                       // } else {
+                         //   size = value.size ?? size
+                       // }
+                       // if rotation == .left || rotation == .right {
+                           // size = value.size ?? size
+                      //  }
+                    }
                     magnify.contentSize = size
                 }
             }
-            
+            first = false
         }
         viewDisposable.set(image.start())
         

@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 class RecentPeerRowItem: ShortPeerRowItem {
 
@@ -104,7 +105,7 @@ class RecentPeerRowView : ShortPeerRowView {
     }
     
     override func updateMouse() {
-        if mouseInside() {
+        if mouseInside(), removeControl.superview != nil {
             removeControl.isHidden = false
             badgeView?.isHidden = true
         } else {
@@ -142,7 +143,7 @@ class RecentPeerRowView : ShortPeerRowView {
     
     override var backdorColor: NSColor {
         if let item = item {
-            return item.isHighlighted && !item.isSelected ? presentation.colors.grayForeground : super.backdorColor
+            return item.isHighlighted && !item.isSelected ? theme.colors.grayForeground : super.backdorColor
         } else {
             return super.backdorColor
         }

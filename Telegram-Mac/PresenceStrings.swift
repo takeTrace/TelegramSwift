@@ -7,8 +7,9 @@
 //
 
 import Cocoa
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
 func stringForTimestamp(day: Int32, month: Int32, year: Int32) -> String {
     return String(format: "%d.%02d.%02d", day, month, year - 100)
@@ -88,7 +89,7 @@ func stringAndActivityForUserPresence(_ presence: TelegramUserPresence, timeDiff
         let statusTimestampInt: Int = Int(statusTimestamp)
         let statusTimestamp = Int32(min(statusTimestampInt - Int(timeDifference), Int(INT32_MAX)))
         if statusTimestamp >= timestamp {
-            return (L10n.peerStatusOnline, true, theme.colors.blueText)
+            return (L10n.peerStatusOnline, true, theme.colors.accent)
         } else {
             let difference = timestamp - statusTimestamp
             if difference < 59 {
@@ -133,7 +134,7 @@ func stringAndActivityForUserPresence(_ presence: TelegramUserPresence, timeDiff
     case .recently:
         let activeUntil = presence.lastActivity - Int32(timeDifference) + 30
         if activeUntil >= timestamp {
-            return (L10n.peerStatusOnline, true, theme.colors.blueText)
+            return (L10n.peerStatusOnline, true, theme.colors.accent)
         } else {
             return (L10n.peerStatusRecently, false, theme.colors.grayText)
         }

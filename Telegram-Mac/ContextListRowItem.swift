@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 
 
 
@@ -45,7 +46,7 @@ class ContextListRowItem: TableRowItem {
         switch result {
         case let .externalReference(_, _, _, title, description, url, content, thumbnail, _):
             if let thumbnail = thumbnail {
-                representation = TelegramMediaImageRepresentation(dimensions: NSMakeSize(50, 50), resource: thumbnail.resource)
+                representation = TelegramMediaImageRepresentation(dimensions: PixelDimensions(NSMakeSize(50, 50)), resource: thumbnail.resource)
             }
             if let content = content {
                 if content.mimeType.hasPrefix("audio") {
@@ -85,13 +86,13 @@ class ContextListRowItem: TableRowItem {
         
         
         if let representation = representation {
-            let tmpImage = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [representation], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+            let tmpImage = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [representation], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
             iconSignal = chatWebpageSnippetPhoto(account: context.account, imageReference: ImageMediaReference.standalone(media: tmpImage), scale: 2.0, small:true)
             
-            let iconSize = representation.dimensions.aspectFilled(CGSize(width: 50, height: 50))
+            let iconSize = representation.dimensions.size.aspectFilled(CGSize(width: 50, height: 50))
             
             let imageCorners = ImageCorners(topLeft: .Corner(2.0), topRight: .Corner(2.0), bottomLeft: .Corner(2.0), bottomRight: .Corner(2.0))
-            arguments = TransformImageArguments(corners: imageCorners, imageSize: representation.dimensions, boundingSize: iconSize, intrinsicInsets: NSEdgeInsets())
+            arguments = TransformImageArguments(corners: imageCorners, imageSize: representation.dimensions.size, boundingSize: iconSize, intrinsicInsets: NSEdgeInsets())
             iconText = nil
         } else {
             arguments = nil
@@ -154,7 +155,7 @@ class ContextListRowItem: TableRowItem {
 class ContextListRowView : TableRowView {
 
     override var backdorColor: NSColor {
-        return item?.isSelected ?? false ? theme.colors.blueSelect : theme.colors.background
+        return item?.isSelected ?? false ? theme.colors.accentSelect : theme.colors.background
     }
     override func draw(_ layer: CALayer, in ctx: CGContext) {
         super.draw(layer, in: ctx)
@@ -200,7 +201,7 @@ class ContextListImageView : TableRowView {
     }
     
     override var backdorColor: NSColor {
-        return item?.isSelected ?? false ? theme.colors.blueSelect : theme.colors.background
+        return item?.isSelected ?? false ? theme.colors.accentSelect : theme.colors.background
     }
     
     override func layout() {
@@ -344,12 +345,12 @@ class ContextListAudioView : ContextListRowView, APDelegate {
     func checkState() {
         if let item = item as? ContextListRowItem, let wrapper = item.audioWrapper, let controller = globalAudio, let song = controller.currentSong {
             if song.entry.isEqual(to: wrapper), case .playing = song.state {
-                progressView.theme = RadialProgressTheme(backgroundColor: theme.colors.blueFill, foregroundColor: .white, icon: theme.icons.chatMusicPause, iconInset:NSEdgeInsets(left:1))
+                progressView.theme = RadialProgressTheme(backgroundColor: theme.colors.accent, foregroundColor: .white, icon: theme.icons.chatMusicPause, iconInset:NSEdgeInsets(left:1))
             } else {
-                progressView.theme = RadialProgressTheme(backgroundColor: theme.colors.blueFill, foregroundColor: .white, icon: theme.icons.chatMusicPlay, iconInset:NSEdgeInsets(left:1))
+                progressView.theme = RadialProgressTheme(backgroundColor: theme.colors.accent, foregroundColor: .white, icon: theme.icons.chatMusicPlay, iconInset:NSEdgeInsets(left:1))
             }
         } else {
-            progressView.theme = RadialProgressTheme(backgroundColor: theme.colors.blueFill, foregroundColor: .white, icon: theme.icons.chatMusicPlay, iconInset:NSEdgeInsets(left:1))
+            progressView.theme = RadialProgressTheme(backgroundColor: theme.colors.accent, foregroundColor: .white, icon: theme.icons.chatMusicPlay, iconInset:NSEdgeInsets(left:1))
         }
     }
     

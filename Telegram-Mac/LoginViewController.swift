@@ -8,14 +8,16 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
-import MtProtoKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
+
 private let manager = CountryManager()
 
 final class LoginAuthViewArguments {
     let sendCode:(String)->Void
+    let updatePhoneNumberField:(String)->Void
     let resendCode:()->Void
     let editPhone:()->Void
     let checkCode:(String)->Void
@@ -23,7 +25,8 @@ final class LoginAuthViewArguments {
     let requestPasswordRecovery: (@escaping(PasswordRecoveryOption)-> Void)->Void
     let resetAccount: ()->Void
     let signUp:(String, String, URL?) -> Void
-    init(sendCode:@escaping(String)->Void, resendCode:@escaping()->Void, editPhone:@escaping()->Void, checkCode:@escaping(String)->Void, checkPassword:@escaping(String)->Void, requestPasswordRecovery: @escaping(@escaping(PasswordRecoveryOption)-> Void)->Void, resetAccount: @escaping()->Void, signUp:@escaping(String, String, URL?) -> Void) {
+    let cancelQrAuth:()->Void
+    init(sendCode:@escaping(String)->Void, resendCode:@escaping()->Void, editPhone:@escaping()->Void, checkCode:@escaping(String)->Void, checkPassword:@escaping(String)->Void, requestPasswordRecovery: @escaping(@escaping(PasswordRecoveryOption)-> Void)->Void, resetAccount: @escaping()->Void, signUp:@escaping(String, String, URL?) -> Void, cancelQrAuth: @escaping()->Void, updatePhoneNumberField:@escaping(String)->Void) {
         self.sendCode = sendCode
         self.resendCode = resendCode
         self.editPhone = editPhone
@@ -32,6 +35,8 @@ final class LoginAuthViewArguments {
         self.requestPasswordRecovery = requestPasswordRecovery
         self.resetAccount = resetAccount
         self.signUp = signUp
+        self.cancelQrAuth = cancelQrAuth
+        self.updatePhoneNumberField = updatePhoneNumberField
     }
 }
 
@@ -158,7 +163,7 @@ private class SignupView : View, NSTextFieldDelegate {
                 if let path = paths?.first, let image = NSImage(contentsOfFile: path) {
                     _ = (putToTemp(image: image, compress: true) |> deliverOnMainQueue).start(next: { path in
                         let controller = EditImageModalController(URL(fileURLWithPath: path), settings: .disableSizes(dimensions: .square))
-                        showModal(with: controller, for: mainWindow)
+                        showModal(with: controller, for: mainWindow, animationType: .scaleCenter)
                         _ = (controller.result |> deliverOnMainQueue).start(next: { url, _ in
                             updatePhoto(url)
                             //arguments.updatePhoto(url.path)
@@ -180,7 +185,7 @@ private class SignupView : View, NSTextFieldDelegate {
         
         photoView.frame = NSMakeRect(0, 0, 100, 100)
         
-        addPhotoView.setFrameOrigin(NSMakePoint( floorToScreenPixels(scaleFactor: backingScaleFactor, (photoView.frame.width - addPhotoView.frame.width) / 2), floorToScreenPixels(scaleFactor: backingScaleFactor, (photoView.frame.height - addPhotoView.frame.height) / 2)))
+        addPhotoView.setFrameOrigin(NSMakePoint( floorToScreenPixels(backingScaleFactor, (photoView.frame.width - addPhotoView.frame.width) / 2), floorToScreenPixels(backingScaleFactor, (photoView.frame.height - addPhotoView.frame.height) / 2)))
         
         firstName.frame = NSMakeRect(photoView.frame.maxX + 10, 20, frame.width - (photoView.frame.maxX + 10), 20)
         lastName.frame = NSMakeRect(photoView.frame.maxX + 10, 70, frame.width - (photoView.frame.maxX + 10), 20)
@@ -438,13 +443,24 @@ private class InputCodeContainerView : View, NSTextFieldDelegate {
         
         
         
-        codeText.setFrameOrigin(0, floorToScreenPixels(scaleFactor: backingScaleFactor, 75 - codeText.frame.height/2))
+        codeText.setFrameOrigin(0, floorToScreenPixels(backingScaleFactor, 75 - codeText.frame.height/2))
         
-        numberText.setFrameOrigin(0, floorToScreenPixels(scaleFactor: backingScaleFactor, 25 - yourPhoneLabel.frame.height/2))
-        editControl.setFrameOrigin(frame.width - editControl.frame.width, floorToScreenPixels(scaleFactor: backingScaleFactor, 25 - yourPhoneLabel.frame.height/2))
+        numberText.setFrameOrigin(0, floorToScreenPixels(backingScaleFactor, 25 - yourPhoneLabel.frame.height/2))
+        editControl.setFrameOrigin(frame.width - editControl.frame.width, floorToScreenPixels(backingScaleFactor, 25 - yourPhoneLabel.frame.height/2))
         
         
-        textView.centerX(y: codeText.frame.maxY + 50 + (passwordEnabled ? inputPassword.frame.height : 0))
+        var topOffset: CGFloat = codeText.frame.minY
+        
+        if !codeText.isHidden {
+            topOffset += 50
+        }
+        if numberText.isHidden {
+            topOffset -= 50
+        }
+
+        
+        
+        textView.centerX(y: topOffset + 20 + (passwordEnabled ? inputPassword.frame.height : 0))
         delayView.centerX(y: textView.frame.maxY + 20)
         errorLabel.centerX(y: codeText.frame.maxY + 25 + (passwordEnabled ? inputPassword.frame.height : 0))
         
@@ -454,7 +470,9 @@ private class InputCodeContainerView : View, NSTextFieldDelegate {
         inputPassword.input.setFrameSize(inputPassword.frame.width - inputPassword.passwordLabel.frame.minX, inputPassword.input.frame.height)
         inputPassword.input.centerY()
 
-        inputPassword.setFrameOrigin(0, 101)
+        
+        
+        inputPassword.setFrameOrigin(0, topOffset)
     }
     
     fileprivate func update(with type:SentAuthorizationCodeType, nextType:AuthorizationCodeNextType? = nil, timeout:Int32?) {
@@ -626,6 +644,11 @@ private class InputCodeContainerView : View, NSTextFieldDelegate {
     func showPasswordInput(_ hint:String, _ number:String, _ code:String, animated: Bool) {
         errorLabel.state.set(.single(.normal))
         self.passwordEnabled = true
+        
+        self.codeText.isHidden = code.isEmpty
+        self.numberText.isHidden = number.isEmpty
+        self.editControl.isHidden = number.isEmpty
+        
         self.numberText.stringValue = number
         self.codeText.stringValue = code
         if !hint.isEmpty {
@@ -655,9 +678,8 @@ private class InputCodeContainerView : View, NSTextFieldDelegate {
         
         forgotPasswordView.isHidden = false
         
-       
-        
         needsLayout = true
+        needsDisplay = true
     }
     
     func controlTextDidChange(_ obj: Notification) {
@@ -683,8 +705,12 @@ private class InputCodeContainerView : View, NSTextFieldDelegate {
         
         
         ctx.setFillColor(theme.colors.border.cgColor)
-        ctx.fill(NSMakeRect(0, 50, frame.width, .borderSize))
-        ctx.fill(NSMakeRect(0, 100, frame.width, .borderSize))
+        if !self.numberText.isHidden {
+            ctx.fill(NSMakeRect(0, 50, frame.width, .borderSize))
+        }
+        if !codeText.isHidden {
+            ctx.fill(NSMakeRect(0, 100, frame.width, .borderSize))
+        }
     }
     
     override func setFrameSize(_ newSize: NSSize) {
@@ -824,13 +850,13 @@ private class PhoneNumberContainerView : View, NSTextFieldDelegate {
         
       //  let maxInset: CGFloat = max(countryLabel.frame.width,numberLabel.frame.width)
       //  let contentInset = maxInset + 20 + 5
-        countrySelector.setFrameOrigin(0, floorToScreenPixels(scaleFactor: backingScaleFactor, 25 - countrySelector.frame.height/2))
+        countrySelector.setFrameOrigin(0, floorToScreenPixels(backingScaleFactor, 25 - countrySelector.frame.height/2))
         
-     //  countryLabel.setFrameOrigin(maxInset - countryLabel.frame.width, floorToScreenPixels(scaleFactor: backingScaleFactor, 25 - countryLabel.frame.height/2))
-     //   numberLabel.setFrameOrigin(maxInset - numberLabel.frame.width, floorToScreenPixels(scaleFactor: backingScaleFactor, 75 - numberLabel.frame.height/2))
+     //  countryLabel.setFrameOrigin(maxInset - countryLabel.frame.width, floorToScreenPixels(backingScaleFactor, 25 - countryLabel.frame.height/2))
+     //   numberLabel.setFrameOrigin(maxInset - numberLabel.frame.width, floorToScreenPixels(backingScaleFactor, 75 - numberLabel.frame.height/2))
         
-        codeText.setFrameOrigin(0, floorToScreenPixels(scaleFactor: backingScaleFactor, 75 - codeText.frame.height/2))
-        numberText.setFrameOrigin(separatorInset, floorToScreenPixels(scaleFactor: backingScaleFactor, 75 - codeText.frame.height/2))
+        codeText.setFrameOrigin(0, floorToScreenPixels(backingScaleFactor, 75 - codeText.frame.height/2))
+        numberText.setFrameOrigin(separatorInset, floorToScreenPixels(backingScaleFactor, 75 - codeText.frame.height/2))
         errorLabel.centerX(y: 110)
     }
     
@@ -917,12 +943,18 @@ private class PhoneNumberContainerView : View, NSTextFieldDelegate {
                 
                 
             } else if field == numberText {
-                var formated = formatPhoneNumber(dec + numberText.stringValue.components(separatedBy: CharacterSet.decimalDigits.inverted).joined())
+                let current = dec + numberText.stringValue.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+                var formated: String = current
+                if !current.hasPrefix("99288") {
+                   formated = formatPhoneNumber(current)
+                }
                 if formated.hasPrefix("+") {
                     formated = formated.fromSuffix(2)
                 }
                 formated = formated.substring(from: dec.endIndex).prefix(17)
                 numberText.stringValue = formated
+                
+                self.arguments?.updatePhoneNumberField(formated)
             }
             
         }
@@ -1005,7 +1037,7 @@ private final class AwaitingResetConfirmationView : View {
     private let reset: TitleButton = TitleButton()
     private var phoneNumber: String = ""
     private var protectedUntil: Int32 = 0
-    private var timer: SwiftSignalKitMac.Timer?
+    private var timer: SwiftSignalKit.Timer?
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         textView.isSelectable = false
@@ -1026,7 +1058,7 @@ private final class AwaitingResetConfirmationView : View {
         }, for: .Click)
         
         if self.timer == nil {
-            let timer = SwiftSignalKitMac.Timer(timeout: 1.0, repeat: true, completion: { [weak self] in
+            let timer = SwiftSignalKit.Timer(timeout: 1.0, repeat: true, completion: { [weak self] in
                 self?.updateTimerValue()
                 }, queue: Queue.mainQueue())
             self.timer = timer

@@ -13,10 +13,12 @@ struct CalendarMonthInteractions {
     let selectAction:(Date)->Void
     let backAction:((Date)->Void)?
     let nextAction:((Date)->Void)?
-    init(selectAction:@escaping (Date)->Void, backAction:((Date)->Void)? = nil, nextAction:((Date)->Void)? = nil) {
+    let changeYear: (Int32, Date)->Void
+    init(selectAction:@escaping (Date)->Void, backAction:((Date)->Void)? = nil, nextAction:((Date)->Void)? = nil, changeYear: @escaping(Int32, Date)->Void) {
         self.selectAction = selectAction
         self.backAction = backAction
         self.nextAction = nextAction
+        self.changeYear = changeYear
     }
 }
 
@@ -121,7 +123,7 @@ class CalendarMonthView : View {
                     
                     if let selectedDay = month.selectedDay, current == selectedDay {
                         day.isSelected = true
-                        day.set(background: theme.colors.blueSelect, for: .Highlight)
+                        day.set(background: theme.colors.accentSelect, for: .Highlight)
                         day.apply(state: .Highlight)
                     } else {
                         day.set(background: theme.colors.accent, for: .Highlight)
@@ -144,7 +146,7 @@ class CalendarMonthView : View {
     
     override func layout() {
         super.layout()
-        let oneSize:NSSize = NSMakeSize(floorToScreenPixels(scaleFactor: backingScaleFactor, frame.width / 7), floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 6))
+        let oneSize:NSSize = NSMakeSize(floorToScreenPixels(backingScaleFactor, frame.width / 7), floorToScreenPixels(backingScaleFactor, frame.height / 6))
         var inset:NSPoint = NSMakePoint(0, 0)
         for i in 0 ..< subviews.count {
             subviews[i].frame = NSMakeRect(inset.x, inset.y, oneSize.width, oneSize.height)
@@ -188,7 +190,37 @@ class CalendarMonthController: GenericViewController<CalendarMonthView> {
         formatter.dateFormat = "yyyy"
         let yearString:String = formatter.string(from: month.month)
         
-        return TitledBarView(controller: self, .initialize(string: monthString, color: theme.colors.text, font:.medium(.text)), .initialize(string:yearString, color: theme.colors.grayText, font:.normal(.small)))
+        let barView = TitledBarView(controller: self, .initialize(string: monthString, color: theme.colors.text, font:.medium(.text)), .initialize(string:yearString, color: theme.colors.grayText, font:.normal(.small)))
+        
+        barView.set(handler: { [weak self] control in
+            
+            guard let `self` = self else {
+                return
+            }
+            
+            let nowTimestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
+            
+            var now: time_t = time_t(nowTimestamp)
+            var timeinfoNow: tm = tm()
+            localtime_r(&now, &timeinfoNow)
+            
+             var items:[SPopoverItem] = []
+            
+            for i in stride(from: 1900 + timeinfoNow.tm_year - 1, to: 2012, by: -1) {
+                items.append(.init("\(i)", { [weak self] in
+                    guard let `self` = self else {
+                        return
+                    }
+                    self.interactions.changeYear(i, self.month.month)
+                }))
+            }
+            if !items.isEmpty {
+                showPopover(for: control, with: SPopoverViewController(items: items), edge: .maxY, inset: NSMakePoint(30, -50))
+            }
+            
+        }, for: .Click)
+        
+        return barView
     }
     
     var isNextEnabled:Bool {

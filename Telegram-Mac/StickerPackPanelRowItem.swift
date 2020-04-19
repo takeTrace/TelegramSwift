@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 class StickerPackPanelRowItem: TableRowItem {
@@ -76,7 +77,7 @@ class StickerPackPanelRowItem: TableRowItem {
             layout.measure(width: 300)
             self.packNameLayout = layout
             
-            self.namePoint = NSMakePoint(10, floorToScreenPixels(scaleFactor: System.backingScale, ((!packInfo.installed ? 50 : 30) - layout.layoutSize.height) / 2))
+            self.namePoint = NSMakePoint(10, floorToScreenPixels(System.backingScale, ((!packInfo.installed ? 50 : 30) - layout.layoutSize.height) / 2))
         } else {
             namePoint = NSZeroPoint
             self.packNameLayout = nil
@@ -121,15 +122,9 @@ class StickerPackPanelRowItem: TableRowItem {
                 inner: switch packInfo {
                 case .saved, .recent:
                     if let reference = file.stickerReference {
-                        inner2: switch reference {
-                        case let .id(id, _):
-                            items.append(ContextMenuItem(L10n.contextViewStickerSet, handler: { [weak self] in
-                                self?.arguments.navigate(ItemCollectionViewEntryIndex.lowerBound(collectionIndex: 0, collectionId: ItemCollectionId.init(namespace: Namespaces.ItemCollection.CloudStickerPacks, id: id)))
-                            }))
-                        default:
-                            break inner2
-                        }
-                        
+                        items.append(ContextMenuItem(L10n.contextViewStickerSet, handler: { [weak self] in
+                            self?.arguments.showPack(reference)
+                        }))
                     }
                 default:
                     break inner
@@ -148,6 +143,20 @@ class StickerPackPanelRowItem: TableRowItem {
                         }))
                     }
                 }
+                
+                items.append(ContextMenuItem(L10n.chatSendWithoutSound, handler: { [weak self] in
+                    guard let `self` = self else {
+                        return
+                    }
+                    let contentView = (self.view as? StickerPackPanelRowView)?.subviews.compactMap { $0 as? ChatMediaContentView}.first(where: { view -> Bool in
+                        return view.media?.isEqual(to: file) ?? false
+                    })
+                    
+                    if let contentView = contentView {
+                        self.arguments.sendMedia(file, contentView, true)
+                    }
+                }))
+                
                 break
             }
         }
@@ -156,6 +165,7 @@ class StickerPackPanelRowItem: TableRowItem {
     
     deinit {
         preloadFeaturedDisposable.dispose()
+        NotificationCenter.default.removeObserver(self)
     }
     
     override var height: CGFloat {
@@ -169,16 +179,16 @@ class StickerPackPanelRowItem: TableRowItem {
 
 private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewProtocol {
     
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         for subview in self.subviews {
             if let contentView = subview as? ChatMediaContentView {
                 if NSPointInRect(point, subview.frame) {
                     if let file = contentView.media as? TelegramMediaFile {
                         let reference = file.stickerReference != nil ? FileMediaReference.stickerPack(stickerPack: file.stickerReference!, media: file) : FileMediaReference.standalone(media: file)
                         if file.isStaticSticker {
-                            return .file(reference, StickerPreviewModalView.self)
+                            return (.file(reference, StickerPreviewModalView.self), contentView)
                         } else if file.isAnimatedSticker {
-                            return .file(reference, AnimatedStickerPreviewModalView.self)
+                            return (.file(reference, AnimatedStickerPreviewModalView.self), contentView)
                         }
                     }
                 }
@@ -190,6 +200,7 @@ private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewP
     
     private var contentViews:[Optional<ChatMediaContentView>] = []
     private let packNameView = TextView()
+    private var clearRecentButton: ImageButton?
     private var addButton:TitleButton?
     private let longDisposable = MetaDisposable()
     
@@ -246,7 +257,7 @@ private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewP
                                 if !item.packInfo.installed, let reference = item.packReference {
                                     item.arguments.showPack(reference)
                                 } else {
-                                    item.arguments.sendMedia(media, contentView)
+                                    item.arguments.sendMedia(media, contentView, false)
                                 }
                             }
                             return
@@ -277,6 +288,9 @@ private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewP
             return
         }
         packNameView.setFrameOrigin(item.namePoint)
+        
+        self.clearRecentButton?.setFrameOrigin(frame.width - 34, item.namePoint.y - 10)
+
         updateVisibleItems()
     }
     
@@ -365,7 +379,7 @@ private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewP
             view.removeFromSuperview()
         }
         
-        self.subviews = (self.addButton != nil ? [self.addButton!] : []) + [self.packNameView] + self.contentViews.compactMap { $0 }
+        self.subviews = (self.clearRecentButton != nil ? [self.clearRecentButton!] : []) + (self.addButton != nil ? [self.addButton!] : []) + [self.packNameView] + self.contentViews.compactMap { $0 }
                 
         CATransaction.commit()
         
@@ -390,6 +404,25 @@ private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewP
         
         packNameView.update(item.packNameLayout)
         
+        switch item.packInfo {
+        case .recent:
+            if self.clearRecentButton == nil {
+                self.clearRecentButton = ImageButton()
+                addSubview(self.clearRecentButton!)
+            }
+            self.clearRecentButton?.set(image: theme.icons.wallpaper_color_close, for: .Normal)
+            _ = self.clearRecentButton?.sizeToFit(NSMakeSize(5, 5), thatFit: false)
+            
+            self.clearRecentButton?.removeAllHandlers()
+            
+            self.clearRecentButton?.set(handler: { [weak item] _ in
+                item?.arguments.clearRecent()
+            }, for: .Click)
+        default:
+            self.clearRecentButton?.removeFromSuperview()
+            self.clearRecentButton = nil
+        }
+        
         self.previousRange = (0, 0)
         
         while self.contentViews.count > item.files.count {
@@ -405,8 +438,8 @@ private final class StickerPackPanelRowView : TableRowView, ModalPreviewRowViewP
         
         if let reference = item.packReference, !item.packInfo.installed {
             self.addButton = TitleButton()
-            self.addButton!.set(background: theme.colors.accent, for: .Normal)
-            self.addButton!.set(background: theme.colors.blueIcon.withAlphaComponent(0.8), for: .Highlight)
+            self.addButton!.set(background: theme.colors.accentSelect, for: .Normal)
+            self.addButton!.set(background: theme.colors.accentSelect.withAlphaComponent(0.8), for: .Highlight)
             self.addButton!.set(font: .medium(.text), for: .Normal)
             self.addButton!.set(color: .white, for: .Normal)
             self.addButton!.set(text: L10n.navigationAdd, for: .Normal)

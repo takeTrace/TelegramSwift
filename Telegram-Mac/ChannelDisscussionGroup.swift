@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 
 private final class DiscussionArguments {
@@ -31,9 +32,9 @@ private final class DiscussionArguments {
 private func generateDiscussIcon() -> CGImage {
     let image: CGImage
     switch theme.colors.name {
-    case mojavePalette.name:
+    case systemPalette.name:
         image = NSImage(named: "DiscussDarkPreview")!.precomposed()
-    case nightBluePalette.name:
+    case nightAccentPalette.name:
         image = NSImage(named: "DiscussDarkBluePreview")!.precomposed()
     default:
         if theme.colors.isDark {
@@ -50,7 +51,7 @@ private func generateDiscussIcon() -> CGImage {
         
         let palette = theme.colors
         
-        let attributeString: NSAttributedString = .initialize(string: L10n.discussionControllerIconText, color: palette.blueIcon, font: .normal(12))
+        let attributeString: NSAttributedString = .initialize(string: L10n.discussionControllerIconText, color: palette.accentIcon, font: .normal(12))
         
         let node = TextNode.layoutText(maybeNode: nil, attributeString, palette.background, 1, .end, NSMakeSize(size.width - 10, size.height), nil, false, .center)
 
@@ -163,11 +164,11 @@ private func channelDiscussionEntries(state: DiscussionState, arguments: Discuss
         
         let peers = state.filteredPeers
         
-        for peer in peers {
+        for (i, peer) in peers.enumerated() {
             
             let status = peer.addressName != nil ? "@\(peer.addressName!)" : (peer.isSupergroup || peer.isGroup ? L10n.discussionControllerPrivateGroup : L10n.discussionControllerPrivateChannel)
             entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_peer(peer.id), equatable: InputDataEquatable(PeerEquatable(peer: peer)), item: { initialSize, stableId in
-                return ShortPeerRowItem(initialSize, peer: peer, account: arguments.context.account, status: status, inset: NSEdgeInsetsMake(0, 30, 0, 30), action: {
+                return ShortPeerRowItem(initialSize, peer: peer, account: arguments.context.account, status: status, inset: NSEdgeInsetsMake(0, 30, 0, 30), viewType: i == 0 ? .innerItem : bestGeneralViewType(peers, for: i), action: {
                     arguments.setup(peer)
                 })
             }))
@@ -187,25 +188,27 @@ private func channelDiscussionEntries(state: DiscussionState, arguments: Discuss
                 
                 return DiscussionHeaderItem(initialSize, stableId: stableId, icon: generateDiscussIcon(), text: attributedString)
             }))
-            
             index += 1
+            
+            entries.append(.sectionId(sectionId, type: .normal))
+            sectionId += 1
             
             let status = associatedPeer.addressName != nil ? "@\(associatedPeer.addressName!)" : (associatedPeer.isSupergroup ? L10n.discussionControllerPrivateGroup : L10n.discussionControllerPrivateChannel)
             entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_peer_info(associatedPeer.id), equatable: InputDataEquatable(PeerEquatable(peer: associatedPeer)), item: { initialSize, stableId in
-                return ShortPeerRowItem(initialSize, peer: associatedPeer, account: arguments.context.account, status: status, inset: NSEdgeInsetsMake(0, 30, 0, 30), action: {
+                return ShortPeerRowItem(initialSize, peer: associatedPeer, account: arguments.context.account, status: status, inset: NSEdgeInsetsMake(0, 30, 0, 30), viewType: .singleItem, action: {
                     arguments.openInfo(associatedPeer.id)
                 })
             }))
             index += 1
             
-            entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.discussionControllerChannelSetDescription), color: theme.colors.grayText, detectBold: true))
+            entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.discussionControllerChannelSetDescription), data: InputDataGeneralTextData(viewType: .textBottomItem)))
             index += 1
             
             if state.unlinkAbility {
                 entries.append(.sectionId(sectionId, type: .normal))
                 sectionId += 1
                 
-                entries.append(InputDataEntry.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_unlink_group, data: InputDataGeneralData(name: L10n.discussionControllerChannelSetUnlinkGroup, color: theme.colors.redUI, action: {
+                entries.append(InputDataEntry.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_unlink_group, data: InputDataGeneralData(name: L10n.discussionControllerChannelSetUnlinkGroup, color: theme.colors.redUI, viewType: .singleItem, action: {
                     arguments.unlinkGroup(associatedPeer)
                 })))
                 index += 1
@@ -220,18 +223,24 @@ private func channelDiscussionEntries(state: DiscussionState, arguments: Discuss
                 _ = attributedString.append(string: text, color: theme.colors.grayText, font: .normal(.text))
                 return DiscussionHeaderItem(initialSize, stableId: stableId, icon: generateDiscussIcon(), text: attributedString)
             }))
+            index += 1
+            
+            entries.append(.sectionId(sectionId, type: .normal))
+            sectionId += 1
+            
             if state.searchState == nil || state.searchState!.request.isEmpty {
-                entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_create_group, equatable: nil, item: { initialSize, stableId in
-                    return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.discussionControllerChannelEmptyCreateGroup, nameStyle: blueActionButton, action: {
-                        arguments.createGroup()
-                    }, thumb: GeneralThumbAdditional(thumb: theme.icons.peerInfoAddMember, textInset: 33), inset:NSEdgeInsets(left: 40, right: 30))
+                
+                let viewType: GeneralViewType = state.filteredPeers.isEmpty ? .singleItem : .firstItem
+                
+                entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_create_group, equatable: InputDataEquatable(viewType), item: { initialSize, stableId in
+                    return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.discussionControllerChannelEmptyCreateGroup, nameStyle: blueActionButton, viewType: viewType, action: arguments.createGroup, thumb: GeneralThumbAdditional(thumb: theme.icons.peerInfoAddMember, textInset: 52, thumbInset: 5))
                 }))
                 index += 1
             }
            
             applyList()
             
-            entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.discussionControllerChannelEmptyDescription), color: theme.colors.grayText, detectBold: true))
+            entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.discussionControllerChannelEmptyDescription), data: InputDataGeneralTextData(viewType: .textBottomItem)))
             index += 1
             
         }
@@ -250,19 +259,19 @@ private func channelDiscussionEntries(state: DiscussionState, arguments: Discuss
             
             let status = associatedPeer.addressName != nil ? "@\(associatedPeer.addressName!)" : (associatedPeer.isSupergroup ? L10n.discussionControllerPrivateGroup : L10n.discussionControllerPrivateChannel)
             entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_peer_info(associatedPeer.id), equatable: InputDataEquatable(PeerEquatable(peer: associatedPeer)), item: { initialSize, stableId in
-                return ShortPeerRowItem(initialSize, peer: associatedPeer, account: arguments.context.account, status: status, inset: NSEdgeInsetsMake(0, 30, 0, 30), action: {
+                return ShortPeerRowItem(initialSize, peer: associatedPeer, account: arguments.context.account, status: status, inset: NSEdgeInsetsMake(0, 30, 0, 30), viewType: .singleItem, action: {
                     arguments.openInfo(associatedPeer.id)
                 })
             }))
             index += 1
             
-            entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.discussionControllerGroupSetDescription), color: theme.colors.grayText, detectBold: true))
+            entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.discussionControllerGroupSetDescription), data: InputDataGeneralTextData(viewType: .textBottomItem)))
             index += 1
             
             entries.append(.sectionId(sectionId, type: .normal))
             sectionId += 1
             
-            entries.append(InputDataEntry.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_unlink_group, data: InputDataGeneralData(name: L10n.discussionControllerGroupSetUnlinkChannel, color: theme.colors.redUI, action: {
+            entries.append(InputDataEntry.general(sectionId: sectionId, index: index, value: .none, error: nil, identifier: _id_unlink_group, data: InputDataGeneralData(name: L10n.discussionControllerGroupSetUnlinkChannel, color: theme.colors.redUI, viewType: .singleItem, action: {
                 arguments.unlinkGroup(associatedPeer)
             })))
             index += 1
@@ -271,7 +280,7 @@ private func channelDiscussionEntries(state: DiscussionState, arguments: Discuss
                 
                 let attributedString = NSMutableAttributedString()
                 _ = attributedString.append(string: L10n.discussionControllerGroupUnsetDescription, color: theme.colors.grayText, font: .normal(.text))
-                return GeneralTextRowItem(initialSize, stableId: stableId, text: attributedString, alignment: .center, centerViewAlignment: true)
+                return GeneralTextRowItem(initialSize, stableId: stableId, text: attributedString, alignment: .center, centerViewAlignment: true, viewType: .textBottomItem)
             }))
             
         }
@@ -316,28 +325,30 @@ func ChannelDiscussionSetupController(context: AccountContext, peer: Peer)-> Inp
     let actionsDisposable = DisposableSet()
 
     func setup(_ channelId: PeerId, _ groupId: PeerId?, updatePreHistory: Bool = false) -> Void {
-        let signal: Signal<Bool, ChannelDiscussionGroupError>
+        let signal: Signal<Bool, (ConvertGroupToSupergroupError?, ChannelDiscussionGroupError?)>
         
         if let groupId = groupId, groupId.namespace == Namespaces.Peer.CloudGroup {
             signal = convertGroupToSupergroup(account: context.account, peerId: groupId)
-                |> mapError { _ in return ChannelDiscussionGroupError.generic }
+                |> mapError { value in
+                    return (value, nil)
+                }
                 |> mapToSignal { upgradedPeerId in
-                return updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: channelId, groupId: upgradedPeerId)
-            }
+                    return updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: channelId, groupId: upgradedPeerId) |> mapError { value in return (nil, value) }
+                }
         } else if updatePreHistory, let groupId = groupId {
             signal = updateChannelHistoryAvailabilitySettingsInteractively(postbox: context.account.postbox, network: context.account.network, accountStateManager: context.account.stateManager, peerId: groupId, historyAvailableForNewMembers: true)
-                |> mapError { error -> ChannelDiscussionGroupError in
+                |> mapError { error -> (ConvertGroupToSupergroupError?, ChannelDiscussionGroupError?) in
                     switch error {
                     case .generic:
-                        return .generic
+                        return (nil, .generic)
                     case .hasNotPermissions:
-                        return .hasNotPermissions
+                        return (nil, .hasNotPermissions)
                     }
                 } |> mapToSignal { _ in
-                return updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: channelId, groupId: groupId)
+                return updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: channelId, groupId: groupId) |> mapError { value in return (nil, value) }
             }
         } else {
-            signal = updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: channelId, groupId: groupId)
+            signal = updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: channelId, groupId: groupId) |> mapError { value in return (nil, value) }
         }
         
         actionsDisposable.add(showModalProgress(signal: signal |> deliverOnMainQueue, for: context.window).start(next: { result in
@@ -347,17 +358,27 @@ func ChannelDiscussionSetupController(context: AccountContext, peer: Peer)-> Inp
             updateSearchValue { current in
                 return .none
             }
-        }, error: { error in
-            switch error {
-            case .groupHistoryIsCurrentlyPrivate:
-                confirm(for: context.window, information: L10n.discussionControllerErrorPreHistory, okTitle: L10n.discussionControllerErrorOK, successHandler: { _ in
-                    setup(channelId, groupId, updatePreHistory: true)
-                })
-            case .hasNotPermissions:
-                alert(for: context.window, info: L10n.channelErrorDontHavePermissions)
-            default:
-                alert(for: context.window, info: L10n.unknownError)
+        }, error: { upgradeError, discussError in
+            if let error = upgradeError {
+                switch error {
+                case .tooManyChannels:
+                    showInactiveChannels(context: context, source: .upgrade)
+                case .generic:
+                    alert(for: context.window, info: L10n.unknownError)
+                }
+            } else if let error = discussError {
+                switch error {
+                case .groupHistoryIsCurrentlyPrivate:
+                    confirm(for: context.window, information: L10n.discussionControllerErrorPreHistory, okTitle: L10n.discussionControllerErrorOK, successHandler: { _ in
+                        setup(channelId, groupId, updatePreHistory: true)
+                    })
+                case .hasNotPermissions:
+                    alert(for: context.window, info: L10n.channelErrorDontHavePermissions)
+                default:
+                    alert(for: context.window, info: L10n.unknownError)
+                }
             }
+            
         }))
     }
     

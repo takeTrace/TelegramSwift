@@ -7,15 +7,16 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import TelegramCoreMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 import TGUIKit
 
 
 
 @available(OSX 10.12.2, *)
 class TouchBarStickerItemView: NSScrubberItemView {
-    private var animatedSticker:ChatMediaAnimatedStickerView?
+    private var animatedSticker:MediaAnimatedStickerView?
     private var imageView: TransformImageView?
     private let fetchDisposable = MetaDisposable()
     private(set) var file: TelegramMediaFile?
@@ -40,14 +41,14 @@ class TouchBarStickerItemView: NSScrubberItemView {
     }
     
     
-    func update(context: AccountContext, file: TelegramMediaFile) {
+    func update(context: AccountContext, file: TelegramMediaFile, animated: Bool) {
         self.file = file
-        if file.isAnimatedSticker {
+        if file.isAnimatedSticker, animated {
             self.imageView?.removeFromSuperview()
             self.imageView = nil
 
             if self.animatedSticker == nil {
-                self.animatedSticker = ChatMediaAnimatedStickerView(frame: NSZeroRect)
+                self.animatedSticker = MediaAnimatedStickerView(frame: NSZeroRect)
                 addSubview(self.animatedSticker!)
             }
             guard let animatedSticker = self.animatedSticker else {
@@ -64,7 +65,7 @@ class TouchBarStickerItemView: NSScrubberItemView {
             guard let imageView = self.imageView else {
                 return
             }
-            let dimensions = file.dimensions ?? frame.size
+            let dimensions = file.dimensions?.size ?? frame.size
             let imageSize = NSMakeSize(30, 30)
             let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: dimensions.aspectFitted(imageSize), boundingSize: imageSize, intrinsicInsets: NSEdgeInsets())
             

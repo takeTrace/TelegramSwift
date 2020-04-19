@@ -7,9 +7,10 @@
 //
 
 import Foundation
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 enum PeerChannelMemberContextKey: Equatable, Hashable {
     case recent
@@ -28,7 +29,7 @@ private final class PeerChannelMembersOnlineContext {
     let subscribers = Bag<(Int32) -> Void>()
     let disposable: Disposable
     var value: Int32?
-    var emptyTimer: SwiftSignalKitMac.Timer?
+    var emptyTimer: SwiftSignalKit.Timer?
     
     init(disposable: Disposable) {
         self.disposable = disposable
@@ -109,7 +110,7 @@ private final class PeerChannelMemberCategoriesContextsManagerImpl {
                     current.subscribers.remove(index)
                     if current.subscribers.isEmpty {
                         if current.emptyTimer == nil {
-                            let timer = SwiftSignalKitMac.Timer(timeout: 60.0, repeat: false, completion: { [weak context] in
+                            let timer = SwiftSignalKit.Timer(timeout: 60.0, repeat: false, completion: { [weak context] in
                                 if let current = strongSelf.onlineContexts[peerId], let context = context, current === context {
                                     if current.subscribers.isEmpty {
                                         strongSelf.onlineContexts.removeValue(forKey: peerId)
@@ -245,12 +246,17 @@ final class PeerChannelMemberCategoriesContextsManager {
                             if let presences = (view.views[key] as? PeerPresencesView)?.presences {
                                 for (_, presence) in presences {
                                     if let presence = presence as? TelegramUserPresence {
-                                        let relativeStatus = relativeUserPresenceStatus(presence, timeDifference: network.globalTime > 0 ? network.globalTime - Date().timeIntervalSince1970 : 0, relativeTo: Int32(timestamp))
-                                        switch relativeStatus {
-                                        case .online:
-                                            count += 1
+                                        let relativeStatus = relativeUserPresenceStatus(presence, timeDifference: network.globalTime > 0 ? network.globalTime - timestamp : 0, relativeTo: Int32(timestamp))
+                                        sw: switch relativeStatus {
+                                        case let .online(at: until):
+                                            if until > Int32(timestamp) {
+                                                count += 1
+                                            } else {
+                                                var bp:Int = 0
+                                                bp += 1
+                                            }
                                         default:
-                                            break
+                                            break sw
                                         }
                                     }
                                 }

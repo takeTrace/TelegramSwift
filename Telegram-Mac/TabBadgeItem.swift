@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import SwiftSignalKitMac
-import TelegramCoreMac
+import Postbox
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 private final class AvatarTabContainer : View {
     private let avatar = AvatarControl(font: .avatar(12))
@@ -22,10 +23,10 @@ private final class AvatarTabContainer : View {
         avatar.userInteractionEnabled = false
         circle.setFrameSize(frameRect.size)
         circle.layer?.cornerRadius = frameRect.height / 2
-        circle.layer?.borderWidth = .borderSize
-        circle.layer?.borderColor = theme.colors.blueIcon.cgColor
-        addSubview(avatar)
+        circle.layer?.borderWidth = 1.33
+        circle.layer?.borderColor = theme.colors.accentIcon.cgColor
         addSubview(circle)
+        addSubview(avatar)
     }
     
     required init?(coder: NSCoder) {
@@ -37,7 +38,7 @@ private final class AvatarTabContainer : View {
     
     override func updateLocalizationAndTheme(theme: PresentationTheme) {
         super.updateLocalizationAndTheme(theme: theme)
-        circle.layer?.borderColor = theme.colors.blueIcon.cgColor
+        circle.layer?.borderColor = theme.colors.accentIcon.cgColor
     }
     
     
@@ -56,9 +57,14 @@ private final class AvatarTabContainer : View {
         if animated {
             let from: CGFloat = selected ? 1 : 24 / frame.height
             let to: CGFloat = selected ? 24 / frame.height : 1
-            avatar.layer?.animateScaleSpring(from: from, to: to, duration: 0.25, removeOnCompletion: false, bounce: false, completion: { completed in
+            avatar.layer?.animateScaleSpring(from: from, to: to, duration: 0.3, removeOnCompletion: false, bounce: false, completion: { completed in
                 
             })
+            if selected {
+                circle.layer?.animateScaleSpring(from: 0.5, to: 1.0, duration: 0.3, bounce: false)
+            } else {
+                circle.layer?.animateScaleSpring(from: 1.0, to: 0.5, duration: 0.3, removeOnCompletion: false, bounce: false)
+            }
         } else {
             if selected {
                 avatar.setFrameSize(NSMakeSize(24, 24))
@@ -80,7 +86,7 @@ class TabBadgeItem: TabItem {
         super.init(image: image, selectedImage: selectedImage, controller: controller, subNode:GlobalBadgeNode(context.account, sharedContext: context.sharedContext, dockTile: true, view: View()), longHoverHandler: longHoverHandler)
     }
     override func withUpdatedImages(_ image: CGImage, _ selectedImage: CGImage) -> TabItem {
-        return TabBadgeItem(context, controller: self.controller, image: image, selectedImage: selectedImage)
+        return TabBadgeItem(context, controller: self.controller, image: image, selectedImage: selectedImage, longHoverHandler: self.longHoverHandler)
     }
 }
 class TabAllBadgeItem: TabItem {
@@ -89,7 +95,7 @@ class TabAllBadgeItem: TabItem {
     private var peer: Peer?
     init(_ context: AccountContext, image: CGImage, selectedImage: CGImage, controller:ViewController, subNode:Node? = nil, longHoverHandler:((Control)->Void)? = nil) {
         self.context = context
-        super.init(image: image, selectedImage: selectedImage, controller: controller, subNode:GlobalBadgeNode(context.account, sharedContext: context.sharedContext, collectAllAccounts: true, view: View()), longHoverHandler: longHoverHandler)
+        super.init(image: image, selectedImage: selectedImage, controller: controller, subNode:GlobalBadgeNode(context.account, sharedContext: context.sharedContext, collectAllAccounts: true, view: View(), applyFilter: false), longHoverHandler: longHoverHandler)
     }
     deinit {
         disposable.dispose()

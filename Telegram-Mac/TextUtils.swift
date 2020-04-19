@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 func pullText(from message:Message, attachEmoji: Bool = true) -> NSString {
     var messageText: NSString = message.text.fixed.nsstring
@@ -26,7 +27,8 @@ func pullText(from message:Message, attachEmoji: Bool = true) -> NSString {
                     messageText = ((attachEmoji ? "🖼 " : "") + message.text.fixed).nsstring
                 }
             }
-            
+        case _ as TelegramMediaDice:
+            messageText = "🎲".nsstring
         case let fileMedia as TelegramMediaFile:
             if fileMedia.isStaticSticker || fileMedia.isAnimatedSticker {
                 messageText = L10n.chatListSticker(fileMedia.stickerText?.fixed ?? "").nsstring
@@ -79,7 +81,7 @@ func pullText(from message:Message, attachEmoji: Bool = true) -> NSString {
     
 }
 
-func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPeer? = nil, embeddedState:PeerChatListEmbeddedInterfaceState? = nil, folder: Bool = false) -> NSAttributedString {
+func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPeer? = nil, embeddedState:PeerChatListEmbeddedInterfaceState? = nil, folder: Bool = false, maxWidth: CGFloat? = nil) -> NSAttributedString {
     
     if let embeddedState = embeddedState as? ChatEmbeddedInterfaceState {
         let mutableAttributedText = NSMutableAttributedString()
@@ -99,7 +101,7 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
             _ = subAttr.append(string: L10n.chatListSecretChatExKeys, color: theme.chatList.grayTextColor, font: .normal(.text))
             case .active:
                 if message == nil {
-                    let title:String = renderedPeer.chatMainPeer?.compactDisplayTitle ?? L10n.peerDeletedUser
+                    let title:String = renderedPeer.chatMainPeer?.displayTitle ?? L10n.peerDeletedUser
                     switch peer.role {
                     case .creator:
                         _ = subAttr.append(string: L10n.chatListSecretChatJoined(title), color: theme.chatList.grayTextColor, font: .normal(.text))
@@ -137,9 +139,19 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
             }
             
             if let author = message.author as? TelegramUser, let peer = peer, peer as? TelegramUser == nil, !peer.isChannel {
-                let peerText: NSString = (author.id == account.peerId ? "\(L10n.chatListYou)" + (folder ? ": " : "\n") : author.compactDisplayTitle + (folder ? ": " : "\n")) as NSString
+                var peerText: String = (author.id == account.peerId ? "\(L10n.chatListYou)" : author.displayTitle)
                 
-                _ = attributedText.append(string: peerText as String, color: theme.chatList.peerTextColor, font: .normal(.text))
+                let layout = TextViewLayout(.initialize(string: peerText, color: nil, font: .normal(.text)))
+                layout.measure(width: maxWidth ?? .greatestFiniteMagnitude)
+                if let line = layout.lines.first, layout.lines.count > 1 {
+                    peerText = peerText.nsstring.substring(with: line.range) + "..."
+                }
+                
+                peerText += (folder ? ": " : "\n")
+                
+                
+                    
+                _ = attributedText.append(string: peerText, color: theme.chatList.peerTextColor, font: .normal(.text))
                 _ = attributedText.append(string: messageText as String, color: theme.chatList.grayTextColor, font: .normal(.text))
             } else {
                 _ = attributedText.append(string: messageText as String, color: theme.chatList.grayTextColor, font: .normal(.text))
@@ -159,6 +171,7 @@ func chatListText(account:Account, for message:Message?, renderedPeer:RenderedPe
             _ = attributedText.append(string: text, color: theme.chatList.grayTextColor, font: .normal(.text))
             attributedText.setSelected(color: theme.colors.underSelectedColor,range: attributedText.range)
         }
+        
         return attributedText
 
     }
@@ -488,8 +501,8 @@ func showSlowModeTimeoutTooltip(_ slowMode: SlowMode, for view: NSView) {
     if let errorText = slowMode.errorText {
         if let validUntil = slowMode.validUntil {
             tooltip(for: view, text: errorText, updateText: { f in
-                var timer:SwiftSignalKitMac.Timer?
-                timer = SwiftSignalKitMac.Timer(timeout: 0.1, repeat: true, completion: {
+                var timer:SwiftSignalKit.Timer?
+                timer = SwiftSignalKit.Timer(timeout: 0.1, repeat: true, completion: {
                     
                     let timeout = (validUntil - Int32(Date().timeIntervalSince1970))
                     

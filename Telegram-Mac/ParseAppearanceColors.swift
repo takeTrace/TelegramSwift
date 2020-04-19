@@ -358,7 +358,7 @@ func importPalette(_ path: String) -> ColorPalette? {
         var copyright: String = "Telegram"
         var wallpaper: PaletteWallpaper?
         var parent: TelegramBuiltinTheme = .dayClassic
-        var accentList:[NSColor] = []
+        var accentList:[PaletteAccentColor] = []
         var colors:[String: NSColor] = [:]
         
         /*
@@ -429,15 +429,13 @@ func importPalette(_ path: String) -> ColorPalette? {
                                 grayTransparent: colors["grayTransparent"] ?? parent.palette.grayTransparent,
                                 grayUI: colors["grayUI"] ?? parent.palette.grayUI,
                                 darkGrayText: colors["darkGrayText"] ?? parent.palette.darkGrayText,
-                                blueText: colors["blueText"] ?? parent.palette.blueText,
-                                blueSelect: colors["blueSelect"] ?? parent.palette.blueSelect,
+                                accentSelect: colors["accentSelect"] ?? parent.palette.accentSelect,
                                 selectText: colors["selectText"] ?? parent.palette.selectText,
-                                blueFill: colors["blueFill"] ?? parent.palette.blueFill,
                                 border: colors["border"] ?? parent.palette.border,
                                 grayBackground: colors["grayBackground"] ?? parent.palette.grayBackground,
                                 grayForeground: colors["grayForeground"] ?? parent.palette.grayForeground,
                                 grayIcon: colors["grayIcon"] ?? parent.palette.grayIcon,
-                                blueIcon: colors["blueIcon"] ?? parent.palette.blueIcon,
+                                accentIcon: colors["accentIcon"] ?? colors["blueIcon"] ?? parent.palette.accentIcon,
                                 badgeMuted: colors["badgeMuted"] ?? parent.palette.badgeMuted,
                                 badge: colors["badge"] ?? parent.palette.badge,
                                 indicatorColor: colors["indicatorColor"] ?? parent.palette.indicatorColor,
@@ -451,15 +449,16 @@ func importPalette(_ path: String) -> ColorPalette? {
                                 selectTextBubble_incoming: colors["selectTextBubble_incoming"] ?? parent.palette.selectTextBubble_incoming,
                                 selectTextBubble_outgoing: colors["selectTextBubble_outgoing"] ?? parent.palette.selectTextBubble_outgoing,
                                 bubbleBackground_incoming: colors["bubbleBackground_incoming"] ?? parent.palette.bubbleBackground_incoming,
-                                bubbleBackground_outgoing: colors["bubbleBackground_outgoing"] ?? parent.palette.bubbleBackground_outgoing,
+                                bubbleBackgroundTop_outgoing: colors["bubbleBackgroundBottom_outgoing"] ?? colors["bubbleBackground_outgoing"] ?? parent.palette.bubbleBackgroundTop_outgoing,
+                                bubbleBackgroundBottom_outgoing: colors["bubbleBackgroundBottom_outgoing"] ?? colors["bubbleBackground_outgoing"] ?? parent.palette.bubbleBackgroundTop_outgoing,
                                 bubbleBorder_incoming: colors["bubbleBorder_incoming"] ?? parent.palette.bubbleBorder_incoming,
                                 bubbleBorder_outgoing: colors["bubbleBorder_outgoing"] ?? parent.palette.bubbleBorder_outgoing,
                                 grayTextBubble_incoming: colors["grayTextBubble_incoming"] ?? parent.palette.grayTextBubble_incoming,
                                 grayTextBubble_outgoing: colors["grayTextBubble_outgoing"] ?? parent.palette.grayTextBubble_outgoing,
                                 grayIconBubble_incoming: colors["grayIconBubble_incoming"] ?? parent.palette.grayIconBubble_incoming,
                                 grayIconBubble_outgoing: colors["grayIconBubble_outgoing"] ?? parent.palette.grayIconBubble_outgoing,
-                                blueIconBubble_incoming: colors["blueIconBubble_incoming"] ?? parent.palette.blueIconBubble_incoming,
-                                blueIconBubble_outgoing: colors["blueIconBubble_outgoing"] ?? parent.palette.blueIconBubble_outgoing,
+                                accentIconBubble_incoming: colors["accentIconBubble_incoming"] ?? colors["blueIconBubble_incoming"] ?? parent.palette.accentIconBubble_incoming,
+                                accentIconBubble_outgoing: colors["accentIconBubble_outgoing"] ?? colors["blueIconBubble_outgoing"] ?? parent.palette.accentIconBubble_outgoing,
                                 linkBubble_incoming: colors["linkBubble_incoming"] ?? parent.palette.linkBubble_incoming,
                                 linkBubble_outgoing: colors["linkBubble_outgoing"] ?? parent.palette.linkBubble_outgoing,
                                 textBubble_incoming: colors["textBubble_incoming"] ?? parent.palette.textBubble_incoming,
@@ -532,7 +531,11 @@ func importPalette(_ path: String) -> ColorPalette? {
                                 revealAction_warning_foreground: colors["revealAction_warning_foreground"] ?? parent.palette.revealAction_warning_foreground,
                                 revealAction_inactive_background: colors["revealAction_inactive_background"] ?? parent.palette.revealAction_inactive_background,
                                 revealAction_inactive_foreground: colors["revealAction_inactive_foreground"] ?? parent.palette.revealAction_inactive_foreground,
-                                chatBackground: colors["chatBackground"] ?? parent.palette.chatBackground)
+                                chatBackground: colors["chatBackground"] ?? parent.palette.chatBackground,
+                                listBackground: colors["listBackground"] ?? parent.palette.listBackground,
+                                listGrayText: colors["listGrayText"] ?? parent.palette.listGrayText,
+                                grayHighlight: colors["grayHighlight"] ?? parent.palette.grayHighlight,
+                                focusAnimationColor: colors["focusAnimationColor"] ?? parent.palette.focusAnimationColor)
         }
         
     }

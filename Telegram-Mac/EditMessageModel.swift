@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 class EditMessageModel: ChatAccessoryModel {
     
     private var account:Account
@@ -49,14 +50,14 @@ class EditMessageModel: ChatAccessoryModel {
             for media in message.media {
                 if let image = media as? TelegramMediaImage {
                     if let representation = largestRepresentationForPhoto(image) {
-                        imageDimensions = representation.dimensions
+                        imageDimensions = representation.dimensions.size
                     }
                     break
                 } else if let file = media as? TelegramMediaFile, file.isVideo {
-                    if let dimensions = file.dimensions {
+                    if let dimensions = file.dimensions?.size {
                         imageDimensions = dimensions
                     } else if let representation = largestImageRepresentation(file.previewRepresentations), !file.isStaticSticker {
-                        imageDimensions = representation.dimensions
+                        imageDimensions = representation.dimensions.size
                     }
                     break
                 }
@@ -94,16 +95,16 @@ class EditMessageModel: ChatAccessoryModel {
                     if let image = media as? TelegramMediaImage {
                         updatedMedia = image
                         if let representation = largestRepresentationForPhoto(image) {
-                            imageDimensions = representation.dimensions
+                            imageDimensions = representation.dimensions.size
                         }
                         break
                     } else if let file = media as? TelegramMediaFile, file.isVideo {
                         updatedMedia = file
                         
                         if let dimensions = file.dimensions {
-                            imageDimensions = dimensions
+                            imageDimensions = dimensions.size
                         } else if let representation = largestImageRepresentation(file.previewRepresentations), !file.isStaticSticker {
-                            imageDimensions = representation.dimensions
+                            imageDimensions = representation.dimensions.size
                         }
                         if file.isInstantVideo {
                             hasRoundImage = true
@@ -125,7 +126,7 @@ class EditMessageModel: ChatAccessoryModel {
                 if view.imageView?.superview == nil {
                     view.addSubview(view.imageView!)
                 }
-                view.imageView?.setFrameOrigin(super.leftInset + (self.isSideAccessory ? 10 : 0), floorToScreenPixels(scaleFactor: System.backingScale, self.topOffset + (self.size.height - self.topOffset - boundingSize.height)/2))
+                view.imageView?.setFrameOrigin(super.leftInset + (self.isSideAccessory ? 10 : 0), floorToScreenPixels(System.backingScale, self.topOffset + (self.size.height - self.topOffset - boundingSize.height)/2))
                 
                 
                 let mediaUpdated = true
@@ -139,7 +140,7 @@ class EditMessageModel: ChatAccessoryModel {
                         if file.isVideo {
                             updateImageSignal = chatMessageVideoThumbnail(account: self.account, fileReference: FileMediaReference.message(message: MessageReference(message), media: file), scale: view.backingScaleFactor)
                         } else if let iconImageRepresentation = smallestImageRepresentation(file.previewRepresentations) {
-                            let tmpImage = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [iconImageRepresentation], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                            let tmpImage = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [iconImageRepresentation], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                             updateImageSignal = chatWebpageSnippetPhoto(account: self.account, imageReference: ImageMediaReference.message(message: MessageReference(message), media: tmpImage), scale: view.backingScaleFactor, small: true)
                         }
                     }

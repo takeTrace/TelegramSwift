@@ -8,8 +8,9 @@
 
 import Cocoa
 
-import TelegramCoreMac
-
+import TelegramCore
+import SyncCore
+import SyncCore
 private enum ApplicationSpecificPreferencesKeyValues: Int32 {
     case inAppNotificationSettings
     case baseAppSettings
@@ -25,8 +26,11 @@ private enum ApplicationSpecificPreferencesKeyValues: Int32 {
     case autoplayMedia = 32
     case voiceCallSettings = 34
     case downloadedPaths = 35
-    case recentEmoji = 36
-
+    case walletPasscodeTimeout = 37
+    case passcodeSettings = 38
+    case appConfiguration = 39
+    case chatListSettings = 47
+    case recentEmoji = 48
 }
 
 struct ApplicationSpecificPreferencesKeys {
@@ -39,6 +43,8 @@ struct ApplicationSpecificPreferencesKeys {
     static let launchSettings = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.launchSettings.rawValue)
     static let autoplayMedia = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.autoplayMedia.rawValue)
     static let downloadedPaths = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.downloadedPaths.rawValue)
+    static let walletPasscodeTimeout = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.walletPasscodeTimeout.rawValue)
+    static let chatListSettings = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.chatListSettings.rawValue)
 
 }
 
@@ -49,13 +55,24 @@ struct ApplicationSharedPreferencesKeys {
     static let autoNight = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.autoNight.rawValue)
     static let additionalSettings = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.additionalSettings.rawValue)
     static let voiceCallSettings = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.voiceCallSettings.rawValue)
+    static let passcodeSettings = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.passcodeSettings.rawValue)
+    static let appConfiguration = applicationSpecificPreferencesKey(ApplicationSpecificPreferencesKeyValues.appConfiguration.rawValue)
 }
 
 
 private enum ApplicationSpecificItemCacheCollectionIdValues: Int8 {
     case instantPageStoredState = 0
+    case cachedInstantPages = 1
 }
 
 public struct ApplicationSpecificItemCacheCollectionId {
     public static let instantPageStoredState = applicationSpecificItemCacheCollectionId(ApplicationSpecificItemCacheCollectionIdValues.instantPageStoredState.rawValue)
+    public static let cachedInstantPages = applicationSpecificItemCacheCollectionId(ApplicationSpecificItemCacheCollectionIdValues.cachedInstantPages.rawValue)
+}
+private enum ApplicationSpecificOrderedItemListCollectionIdValues: Int32 {
+    case settingsSearchRecentItems = 0
+}
+
+public struct ApplicationSpecificOrderedItemListCollectionId {
+    public static let settingsSearchRecentItems = applicationSpecificOrderedItemListCollectionId(ApplicationSpecificOrderedItemListCollectionIdValues.settingsSearchRecentItems.rawValue)
 }

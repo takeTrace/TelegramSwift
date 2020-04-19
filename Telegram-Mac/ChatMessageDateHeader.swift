@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 
 private let timezoneOffset: Int32 = {
     let nowTimestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
@@ -27,13 +28,15 @@ func chatDateId(for timestamp:Int32) -> Int64 {
     return Int64(Calendar.autoupdatingCurrent.startOfDay(for: Date(timeIntervalSince1970: TimeInterval(timestamp))).timeIntervalSince1970)
 }
 func mediaDateId(for timestamp:Int32) -> Int64 {
-    return Int64(Calendar.autoupdatingCurrent.component(.month, from: Date(timeIntervalSince1970: TimeInterval(timestamp))))
+    let startMonth = Calendar.autoupdatingCurrent.date(from: Calendar.current.dateComponents([.year, .month], from: Date(timeIntervalSince1970: TimeInterval(timestamp))))!
+    let endMonth = Calendar.autoupdatingCurrent.date(byAdding: DateComponents(month: 1, day: -1), to: startMonth)!
+    return Int64(endMonth.timeIntervalSince1970)
 }
 
 class ChatDateStickItem : TableStickItem {
     
     private let entry:ChatHistoryEntry
-    fileprivate let timestamp:Int32
+    let timestamp:Int32
     fileprivate let chatInteraction:ChatInteraction?
     let isBubbled: Bool
     let layout:TextViewLayout
@@ -59,7 +62,14 @@ class ChatDateStickItem : TableStickItem {
         
         var text: String
         if timeinfo.tm_year == timeinfoNow.tm_year && timeinfo.tm_yday == timeinfoNow.tm_yday {
-            text = L10n.dateToday
+            
+            switch interaction.mode {
+            case .scheduled:
+                text = L10n.chatDateScheduledForToday
+            default:
+                text = L10n.dateToday
+            }
+            
         } else {
             let dateFormatter = DateFormatter()
             dateFormatter.calendar = Calendar.autoupdatingCurrent
@@ -70,18 +80,21 @@ class ChatDateStickItem : TableStickItem {
             } else if timeinfoNow.tm_year < timeinfo.tm_year {
                 dateFormatter.dateFormat = "dd MMMM yyyy";
             }
-            text = dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
-
-        }
-        switch interaction.mode {
-        case .scheduled:
-            text = L10n.chatDateScheduledFor(text)
-        default:
-            break
+            let dateString = dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
+            switch interaction.mode {
+            case .scheduled:
+                if timestamp == 2147457600 {
+                    text = L10n.chatDateScheduledUntilOnline
+                } else {
+                    text = L10n.chatDateScheduledFor(dateString)
+                }
+            default:
+                text = dateString
+            }
         }
         
         
-        self.layout = TextViewLayout(.initialize(string: text, color: theme.chatServiceItemTextColor, font: .medium(.text)), maximumNumberOfLines: 1, truncationType: .end, alignment: .center)
+        self.layout = TextViewLayout(.initialize(string: text, color: theme.chatServiceItemTextColor, font: .medium(theme.fontSize)), maximumNumberOfLines: 1, truncationType: .end, alignment: .center)
 
         
         super.init(initialSize)

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 
 final class ChatMediaPresentation : Equatable {
     
@@ -50,6 +51,10 @@ final class ChatMediaPresentation : Equatable {
                                      waveformForeground: theme.chat.waveformForeground(isIncoming, renderType == .bubble))
     }
     
+    static var empty: ChatMediaPresentation {
+        return .init(isIncoming: true, isBubble: true, activityBackground: .clear, activityForeground: .clear, text: .clear, grayText: .clear, link: .clear, waveformBackground: .clear, waveformForeground: .clear)
+    }
+    
     var fileThumb: CGImage {
         if isBubble {
             return isIncoming ? theme.icons.chatFileThumbBubble_incoming : theme.icons.chatFileThumbBubble_outgoing
@@ -75,7 +80,7 @@ final class ChatMediaPresentation : Equatable {
     }
     
     static var Empty: ChatMediaPresentation {
-        return ChatMediaPresentation(isIncoming: false, isBubble: false, activityBackground: theme.colors.blueFill, activityForeground: .white, text: theme.colors.text, grayText: theme.colors.grayText, link: theme.colors.link, waveformBackground: theme.colors.waveformBackground, waveformForeground: theme.colors.waveformForeground)
+        return ChatMediaPresentation(isIncoming: false, isBubble: false, activityBackground: theme.colors.accent, activityForeground: theme.colors.underSelectedColor, text: theme.colors.text, grayText: theme.colors.grayText, link: theme.colors.link, waveformBackground: theme.colors.waveformBackground, waveformForeground: theme.colors.waveformForeground)
     }
     
     static func ==(lhs: ChatMediaPresentation, rhs: ChatMediaPresentation) -> Bool {
@@ -97,10 +102,12 @@ private func generatePercentageImage(color: NSColor, value: Int, font: NSFont) -
             context.textMatrix = CGAffineTransform(scaleX: 1.0, y: -1.0)
             let penOffset = CGFloat( CTLineGetPenOffsetForFlush(line.line, layout.penFlush, Double(size.width))) + line.frame.minX
             
+            context.setAllowsFontSubpixelPositioning(true)
+            context.setShouldSubpixelPositionFonts(true)
             context.setAllowsAntialiasing(true)
             context.setShouldAntialias(true)
-            context.setShouldSmoothFonts(false)
-            context.setAllowsFontSmoothing(false)
+            context.setAllowsFontSmoothing(System.backingScale == 1.0)
+            context.setShouldSmoothFonts(System.backingScale == 1.0)
             
             context.textPosition = CGPoint(x: penOffset, y: line.frame.minY)
 
@@ -113,6 +120,7 @@ private func generatePercentageImage(color: NSColor, value: Int, font: NSFont) -
 
 final class TelegramChatColors {
     
+
     
     private var _generatedPercentageAnimationImages:[CGImage]?
     private var _generatedPercentageAnimationImagesIncomingBubbled:[CGImage]?
@@ -194,17 +202,18 @@ final class TelegramChatColors {
         }
     }
     
+    
     private let palette: ColorPalette
     init(_ palette: ColorPalette, _ bubbled: Bool) {
         self.palette = palette
     }
     
-    func pollPercentAnimatedIcons(_ incoming: Bool, _ bubbled: Bool, selected: Bool, from fromValue: CGFloat, to toValue: CGFloat, duration: Double) -> [CGImage] {
+    func pollPercentAnimatedIcons(_ incoming: Bool, _ bubbled: Bool, from fromValue: CGFloat, to toValue: CGFloat, duration: Double) -> [CGImage] {
         let minimumFrameDuration = 1.0 / 60
         let numberOfFrames = max(1, Int(duration / minimumFrameDuration))
         var images: [CGImage] = []
         
-        let generated = bubbled ? incoming ? (selected ? generatedPercentageAnimationImagesIncomingBubbled : generatedPercentageAnimationImagesIncomingBubbledPlain) : (selected ? generatedPercentageAnimationImagesOutgoingBubbled : generatedPercentageAnimationImagesOutgoingBubbledPlain) : (selected ? generatedPercentageAnimationImages : generatedPercentageAnimationImagesPlain)
+        let generated = bubbled ? incoming ? generatedPercentageAnimationImagesIncomingBubbledPlain : generatedPercentageAnimationImagesOutgoingBubbledPlain : generatedPercentageAnimationImagesPlain
         
         for i in 0 ..< numberOfFrames {
             let t = CGFloat(i) / CGFloat(numberOfFrames)
@@ -214,8 +223,8 @@ final class TelegramChatColors {
         return images
     }
     
-    func pollPercentAnimatedIcon(_ incoming: Bool, _ bubbled: Bool, selected: Bool, value: Int) -> CGImage {
-        let generated = bubbled ? incoming ? (selected ? generatedPercentageAnimationImagesIncomingBubbled : generatedPercentageAnimationImagesIncomingBubbledPlain) : (selected ? generatedPercentageAnimationImagesOutgoingBubbled : generatedPercentageAnimationImagesOutgoingBubbledPlain) : (selected ? generatedPercentageAnimationImages : generatedPercentageAnimationImagesPlain)
+    func pollPercentAnimatedIcon(_ incoming: Bool, _ bubbled: Bool, value: Int) -> CGImage {
+        let generated = bubbled ? incoming ? generatedPercentageAnimationImagesIncomingBubbledPlain : generatedPercentageAnimationImagesOutgoingBubbledPlain : generatedPercentageAnimationImagesPlain
         return generated[max(min(generated.count - 1, value), 0)]
     }
     
@@ -235,7 +244,6 @@ final class TelegramChatColors {
     func pollOptionUnselectedImage(_ incoming: Bool, _ bubbled: Bool) -> CGImage {
         return bubbled ? incoming ? theme.icons.chatPollVoteUnselectedBubble_incoming :  theme.icons.chatPollVoteUnselectedBubble_outgoing : theme.icons.chatPollVoteUnselected
     }
-    
     func waveformBackground(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
         return bubbled ? incoming ? palette.waveformBackgroundBubble_incoming : palette.waveformBackgroundBubble_outgoing : palette.waveformBackground
     }
@@ -244,7 +252,7 @@ final class TelegramChatColors {
     }
     
     func backgroundColor(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
-        return bubbled ? incoming ? palette.bubbleBackground_incoming : palette.bubbleBackground_outgoing : palette.chatBackground
+        return bubbled ? incoming ? System.supportsTransparentFontDrawing ? .clear : palette.bubbleBackground_incoming : System.supportsTransparentFontDrawing ?  .clear : palette.bubbleBackgroundTop_outgoing.blended(withFraction: 0.5, of: palette.bubbleBackgroundBottom_outgoing)! : palette.chatBackground
     }
     
     func backgoundSelectedColor(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
@@ -253,6 +261,9 @@ final class TelegramChatColors {
     
     func bubbleBorderColor(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
         return incoming ? palette.bubbleBorder_incoming : palette.bubbleBorder_outgoing//.clear//palette.bubbleBorder_outgoing
+    }
+    func bubbleBackgroundColor(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
+        return bubbled ? incoming ? palette.bubbleBackground_incoming : palette.bubbleBackgroundTop_outgoing : .clear//.clear//palette.bubbleBorder_outgoing
     }
     
     func textColor(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
@@ -273,19 +284,34 @@ final class TelegramChatColors {
     func grayText(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
         return bubbled ? incoming ? palette.grayTextBubble_incoming : palette.grayTextBubble_outgoing : palette.grayText
     }
-    
+    func redUI(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
+        return bubbled ? incoming ? palette.redBubble_incoming : palette.redBubble_outgoing : palette.redUI
+    }
+    func greenUI(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
+        return bubbled ? incoming ? palette.greenBubble_incoming : palette.greenBubble_outgoing : palette.greenUI
+    }
     func linkColor(_ incoming: Bool, _ bubbled: Bool) -> NSColor {
         return bubbled ? incoming ? palette.linkBubble_incoming : palette.linkBubble_outgoing : palette.accent
     }
     
+    func pollSelected(_ incoming: Bool, _ bubbled: Bool, icons: TelegramIconsTheme) -> CGImage {
+        return bubbled ? incoming ? icons.poll_selected_incoming : icons.poll_selected_outgoing : icons.poll_selected
+    }
+    func pollSelectedCorrect(_ incoming: Bool, _ bubbled: Bool, icons: TelegramIconsTheme) -> CGImage {
+        return bubbled ? incoming ? icons.poll_selected_correct_incoming : icons.poll_selected_correct_outgoing : icons.poll_selected_correct
+    }
+    func pollSelectedIncorrect(_ incoming: Bool, _ bubbled: Bool, icons: TelegramIconsTheme) -> CGImage {
+        return bubbled ? incoming ? icons.poll_selected_incorrect_incoming : icons.poll_selected_incorrect_outgoing : icons.poll_selected_incorrect
+    }
+    
     func channelViewsIcon(_ item: ChatRowItem) -> CGImage {
-        return item.isStateOverlayLayout ? item.presentation.icons.chatChannelViewsOverlayBubble : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatChannelViewsInBubble_incoming : item.presentation.icons.chatChannelViewsInBubble_outgoing : item.presentation.icons.chatChannelViewsOutBubble
+        return item.isStateOverlayLayout ? !item.isInteractiveMedia ? item.presentation.chatChannelViewsOverlayServiceBubble : item.presentation.icons.chatChannelViewsOverlayBubble : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatChannelViewsInBubble_incoming : item.presentation.icons.chatChannelViewsInBubble_outgoing : item.presentation.icons.chatChannelViewsOutBubble
     }
     func stateStateIcon(_ item: ChatRowItem) -> CGImage {
-        return item.isFailed ? item.presentation.icons.sentFailed : (item.isStateOverlayLayout ? theme.icons.chatReadMarkOverlayBubble1 : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatReadMarkInBubble1_incoming : item.presentation.icons.chatReadMarkInBubble1_outgoing : item.presentation.icons.chatReadMarkOutBubble1)
+        return item.isFailed ? item.presentation.icons.sentFailed : (item.isStateOverlayLayout ? !item.isInteractiveMedia ? item.presentation.chatReadMarkServiceOverlayBubble1 :  theme.icons.chatReadMarkOverlayBubble1 : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatReadMarkInBubble1_incoming : item.presentation.icons.chatReadMarkInBubble1_outgoing : item.presentation.icons.chatReadMarkOutBubble1)
     }
     func readStateIcon(_ item: ChatRowItem) -> CGImage {
-        return item.isStateOverlayLayout ? item.presentation.icons.chatReadMarkOverlayBubble2 : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatReadMarkInBubble2_incoming : item.presentation.icons.chatReadMarkInBubble2_outgoing : item.presentation.icons.chatReadMarkOutBubble2
+        return item.isStateOverlayLayout ? !item.isInteractiveMedia ? item.presentation.chatReadMarkServiceOverlayBubble2 : item.presentation.icons.chatReadMarkOverlayBubble2 : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatReadMarkInBubble2_incoming : item.presentation.icons.chatReadMarkInBubble2_outgoing : item.presentation.icons.chatReadMarkOutBubble2
     }
     
     func instantPageIcon(_ incoming: Bool, _ bubbled: Bool, presentation: TelegramPresentationTheme) -> CGImage {
@@ -293,13 +319,13 @@ final class TelegramChatColors {
     }
     
     func sendingFrameIcon(_ item: ChatRowItem) -> CGImage {
-        return item.isStateOverlayLayout ? item.presentation.icons.chatSendingOverlayFrame : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatSendingInFrame_incoming : item.presentation.icons.chatSendingInFrame_outgoing : item.presentation.icons.chatSendingOutFrame
+        return item.isStateOverlayLayout ? !item.isInteractiveMedia ? item.presentation.chatSendingOverlayServiceFrame : item.presentation.icons.chatSendingOverlayFrame : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatSendingInFrame_incoming : item.presentation.icons.chatSendingInFrame_outgoing : item.presentation.icons.chatSendingOutFrame
     }
     func sendingHourIcon(_ item: ChatRowItem) -> CGImage {
-        return item.isStateOverlayLayout ? item.presentation.icons.chatSendingOverlayHour : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatSendingInHour_incoming : item.presentation.icons.chatSendingInHour_outgoing : item.presentation.icons.chatSendingOutHour
+        return item.isStateOverlayLayout ? !item.isInteractiveMedia ? item.presentation.chatSendingOverlayServiceHour : item.presentation.icons.chatSendingOverlayHour : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatSendingInHour_incoming : item.presentation.icons.chatSendingInHour_outgoing : item.presentation.icons.chatSendingOutHour
     }
     func sendingMinIcon(_ item: ChatRowItem) -> CGImage {
-        return item.isStateOverlayLayout ? item.presentation.icons.chatSendingOverlayMin : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatSendingInMin_incoming : item.presentation.icons.chatSendingInMin_outgoing : item.presentation.icons.chatSendingOutMin
+        return item.isStateOverlayLayout ? !item.isInteractiveMedia ? item.presentation.chatSendingOverlayServiceMin : item.presentation.icons.chatSendingOverlayMin : item.hasBubble ? item.isIncoming ? item.presentation.icons.chatSendingInMin_incoming : item.presentation.icons.chatSendingInMin_outgoing : item.presentation.icons.chatSendingOutMin
     }
     
     func chatCallIcon(_ item: ChatCallRowItem) -> CGImage {

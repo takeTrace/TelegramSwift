@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 
 
@@ -95,7 +96,7 @@ class AccountInfoView : TableRowView {
     }
     
     override var backdorColor: NSColor {
-        return isSelect ? theme.colors.blueSelect : theme.colors.background
+        return isSelect ? theme.colors.accentSelect : theme.colors.background
     }
     
 

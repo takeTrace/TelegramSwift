@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 import TGUIKit
 class InputPasteboardParser: NSObject {
 
@@ -80,7 +81,7 @@ class InputPasteboardParser: NSObject {
             }
             
             
-            if let _ = items[0].types.index(of: NSPasteboard.PasteboardType(rawValue: "com.apple.traditional-mac-plain-text")) {
+            if let _ = items[0].types.firstIndex(of: NSPasteboard.PasteboardType(rawValue: "com.apple.traditional-mac-plain-text")) {
                 return true
             }
             
@@ -146,7 +147,7 @@ class InputPasteboardParser: NSObject {
             }
             
             
-            if let _ = items[0].types.index(of: NSPasteboard.PasteboardType(rawValue: "com.apple.traditional-mac-plain-text")) {
+            if let _ = items[0].types.firstIndex(of: NSPasteboard.PasteboardType(rawValue: "com.microsoft.appbundleid")) {
                 return true
             }
             

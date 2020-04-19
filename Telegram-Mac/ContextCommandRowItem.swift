@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 class ContextCommandRowItem: TableRowItem {
 
@@ -89,8 +90,8 @@ class ContextCommandRowView : TableRowView {
     override func layout() {
         super.layout()
         if let item = item as? ContextCommandRowItem {
-            textView.update(item.ctxTitle, origin:NSMakePoint(50, floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2 - item.ctxTitle.layoutSize.height)))
-            descView.update(item.ctxDesc, origin:NSMakePoint(50, floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2)))
+            textView.update(item.ctxTitle, origin:NSMakePoint(50, floorToScreenPixels(backingScaleFactor, frame.height / 2 - item.ctxTitle.layoutSize.height)))
+            descView.update(item.ctxDesc, origin:NSMakePoint(50, floorToScreenPixels(backingScaleFactor, frame.height / 2)))
         }
     }
     
@@ -100,7 +101,7 @@ class ContextCommandRowView : TableRowView {
     
     override var backdorColor: NSColor {
         if let item = item {
-            return item.isSelected ? theme.colors.blueSelect : theme.colors.background
+            return item.isSelected ? theme.colors.accentSelect : theme.colors.background
         } else {
             return theme.colors.background
         }

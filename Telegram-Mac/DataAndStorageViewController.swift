@@ -8,9 +8,35 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+
+
+enum DataAndStorageEntryTag : ItemListItemTag {
+    case automaticDownloadReset
+    case autoplayGifs
+    case autoplayVideos
+    
+    func isEqual(to other: ItemListItemTag) -> Bool {
+        if let other = other as? DataAndStorageEntryTag, self == other {
+            return true
+        } else {
+            return false
+        }
+    }
+    var stableId: Int32 {
+        switch self {
+        case .automaticDownloadReset:
+            return 10
+        case .autoplayGifs:
+            return 13
+        case .autoplayVideos:
+            return 14
+        }
+    }
+}
 
 
 public func autodownloadDataSizeString(_ size: Int64) -> String {
@@ -124,22 +150,21 @@ private final class DataAndStorageControllerArguments {
     let toggleAutomaticDownload:(Bool) -> Void
     let resetDownloadSettings:()->Void
     let selectDownloadFolder: ()->Void
-    let toggleAutomaticCopyToDownload:(Bool)->Void
     let toggleAutoplayGifs:(Bool) -> Void
     let toggleAutoplayVideos:(Bool) -> Void
     let toggleAutoplaySoundOnHover:(Bool) -> Void
-
-    init(openStorageUsage: @escaping () -> Void, openNetworkUsage: @escaping () -> Void, openCategorySettings: @escaping(AutomaticMediaDownloadCategoryPeers, String) -> Void, toggleAutomaticDownload:@escaping(Bool) -> Void, resetDownloadSettings:@escaping()->Void, selectDownloadFolder: @escaping() -> Void, toggleAutomaticCopyToDownload:@escaping(Bool)->Void, toggleAutoplayGifs: @escaping(Bool) -> Void, toggleAutoplayVideos:@escaping(Bool) -> Void, toggleAutoplaySoundOnHover:@escaping(Bool) -> Void) {
+    let openProxySettings:()->Void
+    init(openStorageUsage: @escaping () -> Void, openNetworkUsage: @escaping () -> Void, openCategorySettings: @escaping(AutomaticMediaDownloadCategoryPeers, String) -> Void, toggleAutomaticDownload:@escaping(Bool) -> Void, resetDownloadSettings:@escaping()->Void, selectDownloadFolder: @escaping() -> Void, toggleAutoplayGifs: @escaping(Bool) -> Void, toggleAutoplayVideos:@escaping(Bool) -> Void, toggleAutoplaySoundOnHover:@escaping(Bool) -> Void, openProxySettings: @escaping()->Void) {
         self.openStorageUsage = openStorageUsage
         self.openNetworkUsage = openNetworkUsage
         self.openCategorySettings = openCategorySettings
         self.toggleAutomaticDownload = toggleAutomaticDownload
         self.resetDownloadSettings = resetDownloadSettings
         self.selectDownloadFolder = selectDownloadFolder
-        self.toggleAutomaticCopyToDownload = toggleAutomaticCopyToDownload
         self.toggleAutoplayGifs = toggleAutoplayGifs
         self.toggleAutoplayVideos = toggleAutoplayVideos
         self.toggleAutoplaySoundOnHover = toggleAutoplaySoundOnHover
+        self.openProxySettings = openProxySettings
     }
 }
 
@@ -154,25 +179,26 @@ private enum DataAndStorageSection: Int32 {
 
 private enum DataAndStorageEntry: TableItemListNodeEntry {
 
-    case storageUsage(Int32, String)
-    case networkUsage(Int32, String)
-    case automaticMediaDownloadHeader(Int32, String)
-    case automaticDownloadMedia(Int32, Bool)
-    case photos(Int32, AutomaticMediaDownloadCategoryPeers, Bool)
-    case videos(Int32, AutomaticMediaDownloadCategoryPeers, Bool, Int32?)
-    case files(Int32, AutomaticMediaDownloadCategoryPeers, Bool, Int32?)
-    case voice(Int32, AutomaticMediaDownloadCategoryPeers, Bool)
-    case instantVideo(Int32, AutomaticMediaDownloadCategoryPeers, Bool)
-    case gifs(Int32, AutomaticMediaDownloadCategoryPeers, Bool)
+    case storageUsage(Int32, String, viewType: GeneralViewType)
+    case networkUsage(Int32, String, viewType: GeneralViewType)
+    case automaticMediaDownloadHeader(Int32, String, viewType: GeneralViewType)
+    case automaticDownloadMedia(Int32, Bool, viewType: GeneralViewType)
+    case photos(Int32, AutomaticMediaDownloadCategoryPeers, Bool, viewType: GeneralViewType)
+    case videos(Int32, AutomaticMediaDownloadCategoryPeers, Bool, Int32?, viewType: GeneralViewType)
+    case files(Int32, AutomaticMediaDownloadCategoryPeers, Bool, Int32?, viewType: GeneralViewType)
+    case voice(Int32, AutomaticMediaDownloadCategoryPeers, Bool, viewType: GeneralViewType)
+    case instantVideo(Int32, AutomaticMediaDownloadCategoryPeers, Bool, viewType: GeneralViewType)
+    case gifs(Int32, AutomaticMediaDownloadCategoryPeers, Bool, viewType: GeneralViewType)
     
-    case autoplayHeader(Int32)
-    case autoplayGifs(Int32, Bool)
-    case autoplayVideos(Int32, Bool)
-    case soundOnHover(Int32, Bool)
-    case soundOnHoverDesc(Int32)
-    case resetDownloadSettings(Int32, Bool)
-    case downloadFolder(Int32, String)
-    case automaticCopyToDownload(Int32, Bool)
+    case autoplayHeader(Int32, viewType: GeneralViewType)
+    case autoplayGifs(Int32, Bool, viewType: GeneralViewType)
+    case autoplayVideos(Int32, Bool, viewType: GeneralViewType)
+    case soundOnHover(Int32, Bool, viewType: GeneralViewType)
+    case soundOnHoverDesc(Int32, viewType: GeneralViewType)
+    case resetDownloadSettings(Int32, Bool, viewType: GeneralViewType)
+    case downloadFolder(Int32, String, viewType: GeneralViewType)
+    case proxyHeader(Int32)
+    case proxySettings(Int32, String, viewType: GeneralViewType)
     case sectionId(Int32)
     
     var stableId: Int32 {
@@ -199,20 +225,22 @@ private enum DataAndStorageEntry: TableItemListNodeEntry {
             return 9
         case .resetDownloadSettings:
             return 10
-        case .autoplayHeader:
-            return 11
-        case .autoplayGifs:
-            return 12
-        case .autoplayVideos:
-            return 13
-        case .soundOnHover:
-            return 14
-        case .soundOnHoverDesc:
-            return 15
         case .downloadFolder:
+            return 11
+        case .autoplayHeader:
+            return 12
+        case .autoplayGifs:
+            return 13
+        case .autoplayVideos:
+            return 14
+        case .soundOnHover:
+            return 15
+        case .soundOnHoverDesc:
             return 16
-        case .automaticCopyToDownload:
+        case .proxyHeader:
             return 17
+        case .proxySettings:
+            return 18
         case let .sectionId(sectionId):
             return (sectionId + 1) * 1000 - sectionId
         }
@@ -220,42 +248,44 @@ private enum DataAndStorageEntry: TableItemListNodeEntry {
     
     var index:Int32 {
         switch self {
-        case .storageUsage(let sectionId, _):
+        case .storageUsage(let sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case .networkUsage(let sectionId, _):
+        case .networkUsage(let sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case .automaticMediaDownloadHeader(let sectionId, _):
+        case .automaticMediaDownloadHeader(let sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case .automaticDownloadMedia(let sectionId, _):
+        case .automaticDownloadMedia(let sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .photos(sectionId, _, _):
+        case let .photos(sectionId, _, _, _):
             return (sectionId * 1000) + stableId
-        case let .videos(sectionId, _, _, _):
+        case let .videos(sectionId, _, _, _, _):
             return (sectionId * 1000) + stableId
-        case let .files(sectionId, _, _, _):
+        case let .files(sectionId, _, _, _, _):
             return (sectionId * 1000) + stableId
-        case let .voice(sectionId, _, _):
+        case let .voice(sectionId, _, _, _):
             return (sectionId * 1000) + stableId
-        case let .instantVideo(sectionId, _, _):
+        case let .instantVideo(sectionId, _, _, _):
             return (sectionId * 1000) + stableId
-        case let .gifs(sectionId, _, _):
+        case let .gifs(sectionId, _, _, _):
             return (sectionId * 1000) + stableId
-        case let .resetDownloadSettings(sectionId, _):
+        case let .resetDownloadSettings(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .autoplayHeader(sectionId):
+        case let .autoplayHeader(sectionId, _):
             return (sectionId * 1000) + stableId
-        case let .autoplayGifs(sectionId, _):
+        case let .autoplayGifs(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .autoplayVideos(sectionId, _):
+        case let .autoplayVideos(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .soundOnHover(sectionId, _):
+        case let .soundOnHover(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .soundOnHoverDesc(sectionId):
+        case let .soundOnHoverDesc(sectionId, _):
             return (sectionId * 1000) + stableId
-        case let .downloadFolder(sectionId, _):
+        case let .downloadFolder(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .automaticCopyToDownload(sectionId, _):
-            return (sectionId * 1000) + stableId
+        case let .proxyHeader(sectionId):
+            return sectionId
+        case let .proxySettings(sectionId, _, _):
+            return sectionId
         case let .sectionId(sectionId):
             return (sectionId + 1) * 1000 - sectionId
         }
@@ -267,76 +297,77 @@ private enum DataAndStorageEntry: TableItemListNodeEntry {
     
     func item(_ arguments: DataAndStorageControllerArguments, initialSize: NSSize) -> TableRowItem {
         switch self {
-        case let .storageUsage(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: text, type: .next, action: {
+        case let .storageUsage(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: text, type: .next, viewType: viewType, action: {
                 arguments.openStorageUsage()
             })
-        case let .networkUsage(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: text, type: .next, action: {
+        case let .networkUsage(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: text, type: .next, viewType: viewType, action: {
                 arguments.openNetworkUsage()
             })
-        case let .automaticMediaDownloadHeader(_, text):
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case let .automaticDownloadMedia(_ , value):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownload, type: .switchable(value), action: {
+        case let .automaticMediaDownloadHeader(_, text, viewType):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, viewType: viewType)
+        case let .automaticDownloadMedia(_ , value, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownload, type: .switchable(value), viewType: viewType, action: {
                 arguments.toggleAutomaticDownload(!value)
             })
-        case let .photos(_, category, enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadPhoto, description: stringForAutomaticDownloadPeers(peers: AutomaticDownloadPeers(category: category), category: .photo), type: .next, action: {
+        case let .photos(_, category, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadPhoto, description: stringForAutomaticDownloadPeers(peers: AutomaticDownloadPeers(category: category), category: .photo), type: .next, viewType: viewType, action: {
                arguments.openCategorySettings(category, L10n.dataAndStorageAutomaticDownloadPhoto)
             }, enabled: enabled)
-        case let .videos(_, category, enabled, _):
+        case let .videos(_, category, enabled, _, viewType):
             
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadVideo, description: stringForAutomaticDownloadPeers(peers: AutomaticDownloadPeers(category: category), category: .video), type: .next, action: {
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadVideo, description: stringForAutomaticDownloadPeers(peers: AutomaticDownloadPeers(category: category), category: .video), type: .next, viewType: viewType, action: {
                 arguments.openCategorySettings(category, L10n.dataAndStorageAutomaticDownloadVideo)
             }, enabled: enabled)
-        case let .files(_, category, enabled, _):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadFiles, description: stringForAutomaticDownloadPeers(peers: AutomaticDownloadPeers(category: category), category: .file), type: .next, action: {
+        case let .files(_, category, enabled, _, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadFiles, description: stringForAutomaticDownloadPeers(peers: AutomaticDownloadPeers(category: category), category: .file), type: .next, viewType: viewType, action: {
                 arguments.openCategorySettings(category, L10n.dataAndStorageAutomaticDownloadFiles)
             }, enabled: enabled)
-        case let .voice(_, category, enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadVoice, type: .next, action: {
+        case let .voice(_, category, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadVoice, type: .next, viewType: viewType, action: {
                 arguments.openCategorySettings(category, L10n.dataAndStorageAutomaticDownloadVoice)
             }, enabled: enabled)
-        case let .instantVideo(_, category, enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadInstantVideo, type: .next, action: {
+        case let .instantVideo(_, category, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadInstantVideo, type: .next, viewType: viewType, action: {
                 arguments.openCategorySettings(category, L10n.dataAndStorageAutomaticDownloadInstantVideo)
             }, enabled: enabled)
-        case let .gifs(_, category, enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadGIFs, type: .next, action: {
+        case let .gifs(_, category, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadGIFs, type: .next, viewType: viewType, action: {
                 arguments.openCategorySettings(category, L10n.dataAndStorageAutomaticDownloadGIFs)
             }, enabled: enabled)
-        case let .resetDownloadSettings(_, enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadReset, nameStyle: ControlStyle(font: .normal(.title), foregroundColor: theme.colors.accent), type: .none, action: {
+        case let .resetDownloadSettings(_, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutomaticDownloadReset, nameStyle: ControlStyle(font: .normal(.title), foregroundColor: theme.colors.accent), type: .none, viewType: viewType, action: {
                 arguments.resetDownloadSettings()
             }, enabled: enabled)
-        case let .downloadFolder(_, path):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageDownloadFolder, type: .context(path), action: {
+        case let .downloadFolder(_, path, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageDownloadFolder, type: .context(path), viewType: viewType, action: {
                 arguments.selectDownloadFolder()
             })
-        case let .automaticCopyToDownload(_, value):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: "L10n.dataAndStorageAutomaticDownloadToDownloadFolder", type: .switchable(value), action: {
-                arguments.toggleAutomaticDownload(!value)
-            })
-        case .autoplayHeader:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.dataAndStorageAutoplayHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case let .autoplayGifs(_, value):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutoplayGIFs, type: .switchable(value), action: {
+        case let .autoplayHeader(_, viewType):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.dataAndStorageAutoplayHeader, viewType: viewType)
+        case let .autoplayGifs(_, value, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutoplayGIFs, type: .switchable(value), viewType: viewType, action: {
                 arguments.toggleAutoplayGifs(!value)
             })
-        case let .autoplayVideos(_, value):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutoplayVideos, type: .switchable(value), action: {
+        case let .autoplayVideos(_, value, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutoplayVideos, type: .switchable(value), viewType: viewType, action: {
                 arguments.toggleAutoplayVideos(!value)
             })
-        case let .soundOnHover(_, value):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutoplaySoundOnHover, type: .switchable(value), action: {
+        case let .soundOnHover(_, value, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.dataAndStorageAutoplaySoundOnHover, type: .switchable(value), viewType: viewType, action: {
                 arguments.toggleAutoplaySoundOnHover(!value)
             })
-        case .soundOnHoverDesc:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.dataAndStorageAutoplaySoundOnHoverDesc)
-            
+        case let .soundOnHoverDesc(_, viewType):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.dataAndStorageAutoplaySoundOnHoverDesc, viewType: viewType)
+        case .proxyHeader:
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsProxyHeader, viewType: .textTopItem)
+        case let .proxySettings(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsUseProxy, type: .nextContext(text), viewType: viewType, action: {
+                arguments.openProxySettings()
+            })
         default:
-            return GeneralRowItem(initialSize, height: 20, stableId: stableId)
+            return GeneralRowItem(initialSize, height: 30, stableId: stableId, viewType: .separator)
         }
     }
 }
@@ -364,48 +395,63 @@ private struct DataAndStorageData: Equatable {
 }
 
 
-private func dataAndStorageControllerEntries(state: DataAndStorageControllerState, data: DataAndStorageData, autoplayMedia: AutoplayMediaPreferences) -> [DataAndStorageEntry] {
+private func dataAndStorageControllerEntries(state: DataAndStorageControllerState, data: DataAndStorageData, proxy: ProxySettings, autoplayMedia: AutoplayMediaPreferences) -> [DataAndStorageEntry] {
     var entries: [DataAndStorageEntry] = []
     
     var sectionId:Int32 = 1
     entries.append(.sectionId(sectionId))
     sectionId += 1
     
-    entries.append(.storageUsage(sectionId, L10n.dataAndStorageStorageUsage))
-    entries.append(.networkUsage(sectionId, L10n.dataAndStorageNetworkUsage))
+    entries.append(.storageUsage(sectionId, L10n.dataAndStorageStorageUsage, viewType: .firstItem))
+    entries.append(.networkUsage(sectionId, L10n.dataAndStorageNetworkUsage, viewType: .lastItem))
     
     entries.append(.sectionId(sectionId))
     sectionId += 1
 
 
-    entries.append(.automaticMediaDownloadHeader(sectionId, L10n.dataAndStorageAutomaticDownloadHeader))
-    entries.append(.automaticDownloadMedia(sectionId, data.automaticMediaDownloadSettings.automaticDownload))
-    entries.append(.photos(sectionId, data.automaticMediaDownloadSettings.categories.photo, data.automaticMediaDownloadSettings.automaticDownload))
-    entries.append(.videos(sectionId, data.automaticMediaDownloadSettings.categories.video, data.automaticMediaDownloadSettings.automaticDownload, data.automaticMediaDownloadSettings.categories.video.fileSize))
-    entries.append(.files(sectionId, data.automaticMediaDownloadSettings.categories.files, data.automaticMediaDownloadSettings.automaticDownload, data.automaticMediaDownloadSettings.categories.files.fileSize))
-//    entries.append(.voice(sectionId, data.automaticMediaDownloadSettings.categories.voice, data.automaticMediaDownloadSettings.automaticDownload))
-//    entries.append(.instantVideo(sectionId, data.automaticMediaDownloadSettings.categories.instantVideo, data.automaticMediaDownloadSettings.automaticDownload))
-//    entries.append(.gifs(sectionId, data.automaticMediaDownloadSettings.categories.gif, data.automaticMediaDownloadSettings.automaticDownload))
-    entries.append(.resetDownloadSettings(sectionId, data.automaticMediaDownloadSettings != AutomaticMediaDownloadSettings.defaultSettings))
+    entries.append(.automaticMediaDownloadHeader(sectionId, L10n.dataAndStorageAutomaticDownloadHeader, viewType: .textTopItem))
+    entries.append(.automaticDownloadMedia(sectionId, data.automaticMediaDownloadSettings.automaticDownload, viewType: .firstItem))
+    entries.append(.photos(sectionId, data.automaticMediaDownloadSettings.categories.photo, data.automaticMediaDownloadSettings.automaticDownload, viewType: .innerItem))
+    entries.append(.videos(sectionId, data.automaticMediaDownloadSettings.categories.video, data.automaticMediaDownloadSettings.automaticDownload, data.automaticMediaDownloadSettings.categories.video.fileSize, viewType: .innerItem))
+    entries.append(.files(sectionId, data.automaticMediaDownloadSettings.categories.files, data.automaticMediaDownloadSettings.automaticDownload, data.automaticMediaDownloadSettings.categories.files.fileSize, viewType: .innerItem))
+    entries.append(.resetDownloadSettings(sectionId, data.automaticMediaDownloadSettings != AutomaticMediaDownloadSettings.defaultSettings, viewType: .lastItem))
     
     entries.append(.sectionId(sectionId))
     sectionId += 1
     
-    
-    entries.append(.autoplayHeader(sectionId))
-    entries.append(.autoplayGifs(sectionId, autoplayMedia.gifs))
-    entries.append(.autoplayVideos(sectionId, autoplayMedia.videos))
-//    entries.append(.soundOnHover(sectionId, autoplayMedia.soundOnHover))
-//    entries.append(.soundOnHoverDesc(sectionId))
-    
-    entries.append(.sectionId(sectionId))
-    sectionId += 1
-    
-    entries.append(.downloadFolder(sectionId, data.automaticMediaDownloadSettings.downloadFolder))
-    //entries.append(.automaticCopyToDownload(sectionId, data.automaticMediaDownloadSettings.automaticSaveDownloadedFiles))
+    entries.append(.downloadFolder(sectionId, data.automaticMediaDownloadSettings.downloadFolder, viewType: .singleItem))
 
     
+    entries.append(.sectionId(sectionId))
+    sectionId += 1
     
+    
+    entries.append(.autoplayHeader(sectionId, viewType: .textTopItem))
+    entries.append(.autoplayGifs(sectionId, autoplayMedia.gifs, viewType: .firstItem))
+    entries.append(.autoplayVideos(sectionId, autoplayMedia.videos, viewType: .lastItem))
+
+    
+    entries.append(.sectionId(sectionId))
+    sectionId += 1
+    
+    
+    entries.append(.proxyHeader(sectionId))
+    let text: String
+    if let active = proxy.activeServer, proxy.enabled {
+        switch active.connection {
+        case .socks5:
+            text = L10n.proxySettingsSocks5
+        case .mtp:
+            text = L10n.proxySettingsMTP
+        }
+    } else {
+        text = L10n.proxySettingsDisabled
+    }
+    entries.append(.proxySettings(sectionId, text, viewType: .singleItem))
+    
+    
+    entries.append(.sectionId(sectionId))
+    sectionId += 1
     
     return entries
 }
@@ -419,7 +465,13 @@ private func prepareTransition(left:[AppearanceWrapperEntry<DataAndStorageEntry>
 }
 
 class DataAndStorageViewController: TableViewController {
-
+    private let disposable = MetaDisposable()
+    private var focusOnItemTag: DataAndStorageEntryTag?
+    init(_ context: AccountContext, focusOnItemTag: DataAndStorageEntryTag? = nil) {
+        self.focusOnItemTag = focusOnItemTag
+        super.init(context)
+    }
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -455,7 +507,7 @@ class DataAndStorageViewController: TableViewController {
         let arguments = DataAndStorageControllerArguments(openStorageUsage: {
             pushControllerImpl(StorageUsageController(context))
         }, openNetworkUsage: {
-            networkUsageStatsController(context: context, f: pushControllerImpl)
+            pushControllerImpl(networkUsageStatsController(context: context))
         }, openCategorySettings: { category, title in
             pushControllerImpl(DownloadSettingsViewController(context, category, title, updateCategory: { category in
                 _ = updateMediaDownloadSettingsInteractively(postbox: context.account.postbox, { current -> AutomaticMediaDownloadSettings in
@@ -494,10 +546,6 @@ class DataAndStorageViewController: TableViewController {
                 }).start()
             })
             
-        }, toggleAutomaticCopyToDownload: { value in
-            _ = updateMediaDownloadSettingsInteractively(postbox: context.account.postbox, { current -> AutomaticMediaDownloadSettings in
-                return current.withUpdatedAutomaticSaveDownloadedFiles(value)
-            }).start()
         }, toggleAutoplayGifs: { enable in
             _ = updateAutoplayMediaSettingsInteractively(postbox: context.account.postbox, {
                 return $0.withUpdatedAutoplayGifs(enable)
@@ -510,20 +558,50 @@ class DataAndStorageViewController: TableViewController {
             _ = updateAutoplayMediaSettingsInteractively(postbox: context.account.postbox, {
                 return $0.withUpdatedAutoplaySoundOnHover(enable)
             }).start()
+        }, openProxySettings: {
+            let controller = proxyListController(accountManager: context.sharedContext.accountManager, network: context.account.network, share: { servers in
+                var message: String = ""
+                for server in servers {
+                    message += server.link + "\n\n"
+                }
+                message = message.trimmed
+                
+                showModal(with: ShareModalController(ShareLinkObject(context, link: message)), for: mainWindow)
+            }, pushController: { controller in
+                pushControllerImpl(controller)
+            })
+            pushControllerImpl(controller)
         })
         
-        self.genericView.merge(with: combineLatest(queue: .mainQueue(), statePromise.get(), dataAndStorageDataPromise.get(), appearanceSignal, autoplayMediaSettings(postbox: context.account.postbox))
-            |> map { state, dataAndStorageData, appearance, autoplayMediaSettings -> TableUpdateTransition in
-                
-                let entries = dataAndStorageControllerEntries(state: state, data: dataAndStorageData, autoplayMedia: autoplayMediaSettings).map {AppearanceWrapperEntry(entry: $0, appearance: appearance)}
-                return prepareTransition(left: previous.swap(entries), right: entries, initialSize: initialSize.modify({$0}), arguments: arguments)
+        let proxy:Signal<ProxySettings, NoError> = proxySettings(accountManager: context.sharedContext.accountManager)
 
+        
+        
+        let signal = combineLatest(queue: .mainQueue(), statePromise.get(), dataAndStorageDataPromise.get(), appearanceSignal, proxy, autoplayMediaSettings(postbox: context.account.postbox))
+        |> map { state, dataAndStorageData, appearance, proxy, autoplayMediaSettings -> TableUpdateTransition in
+            let entries = dataAndStorageControllerEntries(state: state, data: dataAndStorageData, proxy: proxy, autoplayMedia: autoplayMediaSettings).map {AppearanceWrapperEntry(entry: $0, appearance: appearance)}
+            return prepareTransition(left: previous.swap(entries), right: entries, initialSize: initialSize.modify({$0}), arguments: arguments)
         } |> beforeNext { [weak self] _ in
             self?.readyOnce()
         } |> afterDisposed {
-                actionsDisposable.dispose()
-        })
+            actionsDisposable.dispose()
+        } |> deliverOnMainQueue
         
+        
+        
+        self.disposable.set(signal.start(next: { [weak self] transition in
+            self?.genericView.merge(with: transition)
+            self?.readyOnce()
+            if let focusOnItemTag = self?.focusOnItemTag {
+                self?.genericView.scroll(to: .center(id: focusOnItemTag.stableId, innerId: nil, animated: true, focus: .init(focus: true), inset: 0), inset: NSEdgeInsets())
+                self?.focusOnItemTag = nil
+            }
+        }))
+        
+    }
+    
+    deinit {
+        disposable.dispose()
     }
     
     override func getRightBarViewOnce() -> BarView {

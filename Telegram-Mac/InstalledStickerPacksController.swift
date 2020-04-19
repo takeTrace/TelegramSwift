@@ -8,9 +8,23 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
+
+enum InstalledStickerPacksEntryTag: ItemListItemTag {
+    case suggestOptions
+    case loopAnimatedStickers
+    
+    func isEqual(to other: ItemListItemTag) -> Bool {
+        if let other = other as? InstalledStickerPacksEntryTag, self == other {
+            return true
+        } else {
+            return false
+        }
+    }
+}
 
 private final class InstalledStickerPacksControllerArguments {
     let context: AccountContext
@@ -19,9 +33,10 @@ private final class InstalledStickerPacksControllerArguments {
     let removePack: (ItemCollectionId) -> Void
     let openStickersBot: () -> Void
     let openFeatured: () -> Void
-    let openArchived: () -> Void
+    let openArchived: ([ArchivedStickerPackItem]?) -> Void
     let openSuggestionOptions: () -> Void
-    init(context: AccountContext, openStickerPack: @escaping (StickerPackCollectionInfo) -> Void, removePack: @escaping (ItemCollectionId) -> Void, openStickersBot: @escaping () -> Void, openFeatured: @escaping () -> Void, openArchived: @escaping () -> Void, openSuggestionOptions: @escaping() -> Void) {
+    let toggleLoopAnimated: (Bool)->Void
+    init(context: AccountContext, openStickerPack: @escaping (StickerPackCollectionInfo) -> Void, removePack: @escaping (ItemCollectionId) -> Void, openStickersBot: @escaping () -> Void, openFeatured: @escaping () -> Void, openArchived: @escaping ([ArchivedStickerPackItem]?) -> Void, openSuggestionOptions: @escaping() -> Void, toggleLoopAnimated: @escaping(Bool)->Void) {
         self.context = context
         self.openStickerPack = openStickerPack
         self.removePack = removePack
@@ -29,6 +44,7 @@ private final class InstalledStickerPacksControllerArguments {
         self.openFeatured = openFeatured
         self.openArchived = openArchived
         self.openSuggestionOptions = openSuggestionOptions
+        self.toggleLoopAnimated = toggleLoopAnimated
     }
 }
 
@@ -79,14 +95,40 @@ private enum InstalledStickerPacksEntryId: Hashable {
     }
 }
 
+private struct ArchivedListContainer : Equatable {
+    let archived: [ArchivedStickerPackItem]?
+    static func ==(lhs: ArchivedListContainer, rhs: ArchivedListContainer) -> Bool {
+        if let lhsItem = lhs.archived, let rhsItem = rhs.archived {
+            if lhsItem.count != rhsItem.count {
+                return false
+            } else {
+                for i in 0 ..< lhsItem.count {
+                    let lhs = lhsItem[i]
+                    let rhs = rhsItem[i]
+                    if lhs.info != rhs.info {
+                        return false
+                    }
+                    if lhs.topItems != rhs.topItems {
+                        return false
+                    }
+                }
+            }
+        } else if (lhs.archived != nil) != (rhs.archived != nil) {
+            return false
+        }
+        return true
+    }
+}
+
 private enum InstalledStickerPacksEntry: TableItemListNodeEntry {
     case section(sectionId:Int32)
-    case suggestOptions(sectionId: Int32, String)
-    case trending(sectionId:Int32, Int32)
-    case archived(sectionId:Int32)
-    case packsTitle(sectionId:Int32, String)
-    case pack(sectionId:Int32, Int32, StickerPackCollectionInfo, StickerPackItem?, Int32, Bool, ItemListStickerPackItemEditing)
-    case packsInfo(sectionId:Int32, String)
+    case suggestOptions(sectionId: Int32, String, GeneralViewType)
+    case trending(sectionId:Int32, Int32, GeneralViewType)
+    case archived(sectionId:Int32, ArchivedListContainer, GeneralViewType)
+    case loopAnimated(sectionId: Int32, Bool, GeneralViewType)
+    case packsTitle(sectionId:Int32, String, GeneralViewType)
+    case pack(sectionId:Int32, Int32, StickerPackCollectionInfo, StickerPackItem?, Int32, Bool, Bool, ItemListStickerPackItemEditing, GeneralViewType)
+    case packsInfo(sectionId:Int32, String, GeneralViewType)
     
     
     var stableId: InstalledStickerPacksEntryId {
@@ -97,12 +139,14 @@ private enum InstalledStickerPacksEntry: TableItemListNodeEntry {
             return .index(1)
         case .archived:
             return .index(2)
+        case .loopAnimated:
+            return .index(4)
         case .packsTitle:
-            return .index(3)
-        case let .pack(_, _, info, _, _, _, _):
+            return .index(5)
+        case let .pack(_, _, info, _, _, _, _, _, _):
             return .pack(info.id)
         case .packsInfo:
-            return .index(4)
+            return .index(6)
         case let .section(sectionId):
             return .index((sectionId + 1) * 1000 - sectionId)
         }
@@ -117,12 +161,14 @@ private enum InstalledStickerPacksEntry: TableItemListNodeEntry {
             return 1
         case .archived:
             return 2
-        case .packsTitle:
+        case .loopAnimated:
             return 3
+        case .packsTitle:
+            return 4
         case .pack:
             fatalError("")
         case .packsInfo:
-            return 4
+            return 5
         case let .section(sectionId):
             return (sectionId + 1) * 1000 - sectionId
         }
@@ -130,17 +176,19 @@ private enum InstalledStickerPacksEntry: TableItemListNodeEntry {
     
     var index:Int32 {
         switch self {
-        case let .suggestOptions(sectionId, _):
+        case let .suggestOptions(sectionId, _, _):
             return (sectionId * 1000) + stableIndex
-        case let .trending(sectionId, _):
+        case let .trending(sectionId, _, _):
             return (sectionId * 1000) + stableIndex
-        case let .archived(sectionId):
+        case let .archived(sectionId, _, _):
             return (sectionId * 1000) + stableIndex
-        case let .packsTitle(sectionId, _):
+        case let .loopAnimated(sectionId, _, _):
             return (sectionId * 1000) + stableIndex
-        case let .pack( sectionId, index, _, _, _, _, _):
+        case let .packsTitle(sectionId, _, _):
+            return (sectionId * 1000) + stableIndex
+        case let .pack( sectionId, index, _, _, _, _, _, _, _):
             return (sectionId * 1000) + 100 + index
-        case let .packsInfo(sectionId, _):
+        case let .packsInfo(sectionId, _, _):
             return (sectionId * 1000) + stableIndex
         case let .section(sectionId):
             return (sectionId + 1) * 1000 - sectionId
@@ -153,23 +201,26 @@ private enum InstalledStickerPacksEntry: TableItemListNodeEntry {
     
     func item(_ arguments: InstalledStickerPacksControllerArguments, initialSize:NSSize) -> TableRowItem {
         switch self {
-        case let .suggestOptions(_, value):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.stickersSuggestStickers, type: .context(value), action: {
+        case let .suggestOptions(_, value, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.stickersSuggestStickers, type: .context(value), viewType: viewType, action: {
                 arguments.openSuggestionOptions()
             })
-        case let .trending(_, count):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: tr(L10n.installedStickersTranding), type: .context(count > 0 ? "\(count)" : ""), action: {
+        case let .trending(_, count, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.installedStickersTranding, type: .context(count > 0 ? "\(count)" : ""), viewType: viewType, action: {
                 arguments.openFeatured()
             })
-           
-        case .archived:
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: tr(L10n.installedStickersArchived), type: .next, action: {
-                arguments.openArchived()
+        case let .archived(_, archived, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.installedStickersArchived, type: .next, viewType: viewType, action: {
+                arguments.openArchived(archived.archived)
             })
-        case let .packsTitle(_, text):
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: text)
-        case let .pack(_, _, info, topItem, count, enabled, editing):
-            return StickerSetTableRowItem(initialSize, context: arguments.context, stableId: stableId, info: info, topItem: topItem, itemCount: count, unread: false, editing: editing, enabled: enabled, control: .none, action: {
+        case let .loopAnimated(_, value, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.installedStickersLoopAnimated, type: .switchable(value), viewType: viewType, action: {
+                arguments.toggleLoopAnimated(!value)
+            })
+        case let .packsTitle(_, text, viewType):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, viewType: viewType)
+        case let .pack(_, _, info, topItem, count, enabled, _, editing, viewType):
+            return StickerSetTableRowItem(initialSize, context: arguments.context, stableId: stableId, info: info, topItem: topItem, itemCount: count, unread: false, editing: editing, enabled: enabled, control: .none, viewType: viewType, action: {
                 arguments.openStickerPack(info)
             }, addPack: {
                 
@@ -177,10 +228,10 @@ private enum InstalledStickerPacksEntry: TableItemListNodeEntry {
                 arguments.removePack(info.id)
             })
 
-        case let .packsInfo(_, text):
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: text)
+        case let .packsInfo(_, text, viewType):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, viewType: viewType)
         case .section:
-            return GeneralRowItem(initialSize, height: 20, stableId: stableId)
+            return GeneralRowItem(initialSize, height: 30, stableId: stableId, viewType: .separator)
         }
     }
 }
@@ -215,7 +266,7 @@ private struct InstalledStickerPacksControllerState: Equatable {
 }
 
 
-private func installedStickerPacksControllerEntries(state: InstalledStickerPacksControllerState, stickerSettings: StickerSettings, view: CombinedView, featured: [FeaturedStickerPackItem]) -> [InstalledStickerPacksEntry] {
+private func installedStickerPacksControllerEntries(state: InstalledStickerPacksControllerState, autoplayMedia: AutoplayMediaPreferences, stickerSettings: StickerSettings, view: CombinedView, featured: [FeaturedStickerPackItem], archived: [ArchivedStickerPackItem]?) -> [InstalledStickerPacksEntry] {
     var entries: [InstalledStickerPacksEntry] = []
     
     var sectionId:Int32 = 1
@@ -232,7 +283,7 @@ private func installedStickerPacksControllerEntries(state: InstalledStickerPacks
     case .installed:
         suggestString = L10n.stickersSuggestAdded
     }
-    entries.append(.suggestOptions(sectionId: sectionId, suggestString))
+    entries.append(.suggestOptions(sectionId: sectionId, suggestString, .firstItem))
     
     if featured.count != 0 {
         var unreadCount: Int32 = 0
@@ -241,29 +292,30 @@ private func installedStickerPacksControllerEntries(state: InstalledStickerPacks
                 unreadCount += 1
             }
         }
-        entries.append(.trending(sectionId: sectionId, unreadCount))
+        entries.append(.trending(sectionId: sectionId, unreadCount, .innerItem))
     }
-    entries.append(.archived(sectionId: sectionId))
+    entries.append(.archived(sectionId: sectionId, ArchivedListContainer(archived: archived), .innerItem))
+    entries.append(.loopAnimated(sectionId: sectionId, autoplayMedia.loopAnimatedStickers, .lastItem))
     
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
     
-    entries.append(.packsTitle(sectionId: sectionId, tr(L10n.installedStickersPacksTitle)))
+    entries.append(.packsTitle(sectionId: sectionId, L10n.installedStickersPacksTitle, .textTopItem))
     
     if let stickerPacksView = view.views[.itemCollectionInfos(namespaces: [Namespaces.ItemCollection.CloudStickerPacks])] as? ItemCollectionInfosView {
         if let packsEntries = stickerPacksView.entriesByNamespace[Namespaces.ItemCollection.CloudStickerPacks] {
             var index: Int32 = 0
             for entry in packsEntries {
                 if let info = entry.info as? StickerPackCollectionInfo {
-                    entries.append(.pack(sectionId: sectionId, index, info, entry.firstItem as? StickerPackItem, info.count == 0 ? entry.count : info.count, true, ItemListStickerPackItemEditing(editable: true, editing: state.editing)))
+                    let viewType: GeneralViewType = bestGeneralViewType(packsEntries, for: entry)
+                   
+                    entries.append(.pack(sectionId: sectionId, index, info, entry.firstItem as? StickerPackItem, info.count == 0 ? entry.count : info.count, true, autoplayMedia.loopAnimatedStickers, ItemListStickerPackItemEditing(editable: true, editing: state.editing), viewType))
                     index += 1
                 }
             }
         }
     }
-    entries.append(.section(sectionId: sectionId))
-    sectionId += 1
-    entries.append(.packsInfo(sectionId: sectionId, tr(L10n.installedStickersDescrpiption)))
+    entries.append(.packsInfo(sectionId: sectionId, L10n.installedStickersDescrpiption, .textBottomItem))
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
     return entries
@@ -278,6 +330,11 @@ private func prepareTransition(left:[AppearanceWrapperEntry<InstalledStickerPack
 
 class InstalledStickerPacksController: TableViewController {
 
+    private let focusOnItemTag: InstalledStickerPacksEntryTag?
+    init(_ context: AccountContext, focusOnItemTag: InstalledStickerPacksEntryTag? = nil) {
+        self.focusOnItemTag = focusOnItemTag
+        super.init(context)
+    }
     
     private let disposbale = MetaDisposable()
     private func openSuggestionOptions() {
@@ -307,6 +364,10 @@ class InstalledStickerPacksController: TableViewController {
             statePromise.set(stateValue.modify { f($0) })
         }
         
+        let archivedPromise = Promise<[ArchivedStickerPackItem]?>()
+        archivedPromise.set(.single(nil) |> then(archivedStickerPacks(account: context.account) |> map(Optional.init)))
+        
+
         
         let actionsDisposable = DisposableSet()
         
@@ -314,10 +375,10 @@ class InstalledStickerPacksController: TableViewController {
         actionsDisposable.add(resolveDisposable)
         
         let arguments = InstalledStickerPacksControllerArguments(context: context, openStickerPack: { info in
-            showModal(with: StickersPackPreviewModalController(context, peerId: nil, reference: .name(info.shortName)), for: mainWindow)
+            showModal(with: StickerPackPreviewModalController(context, peerId: nil, reference: .name(info.shortName)), for: context.window)
         }, removePack: { id in
             
-            confirm(for: mainWindow, information: tr(L10n.installedStickersRemoveDescription), okTitle: tr(L10n.installedStickersRemoveDelete), successHandler: { result in
+            confirm(for: context.window, information: tr(L10n.installedStickersRemoveDescription), okTitle: tr(L10n.installedStickersRemoveDelete), successHandler: { result in
                 switch result {
                 case .basic:
                     _ = removeStickerPackInteractively(postbox: context.account.postbox, id: id, option: RemoveStickerPackOption.archive).start()
@@ -334,10 +395,16 @@ class InstalledStickerPacksController: TableViewController {
             }))
         }, openFeatured: { [weak self] in
             self?.navigationController?.push(FeaturedStickerPacksController(context))
-        }, openArchived: { [weak self] in
-            self?.navigationController?.push(ArchivedStickerPacksController(context))
+        }, openArchived: { [weak self] archived in
+            self?.navigationController?.push(ArchivedStickerPacksController(context, archived: archived, updatedPacks: { packs in
+                archivedPromise.set(.single(packs))
+            }))
         }, openSuggestionOptions: { [weak self] in
             self?.openSuggestionOptions()
+        }, toggleLoopAnimated: { value in
+            _ = updateAutoplayMediaSettingsInteractively(postbox: context.account.postbox, {
+                $0.withUpdatedLoopAnimatedStickers(value)
+            }).start()
         })
         let stickerPacks = context.account.postbox.combinedView(keys: [.itemCollectionInfos(namespaces: [Namespaces.ItemCollection.CloudStickerPacks])])
         
@@ -345,14 +412,15 @@ class InstalledStickerPacksController: TableViewController {
         
         
         let stickerSettingsKey = ApplicationSpecificPreferencesKeys.stickerSettings
-        let preferencesKey: PostboxViewKey = .preferences(keys: Set([stickerSettingsKey]))
+        let autoplayKey = ApplicationSpecificPreferencesKeys.autoplayMedia
+        let preferencesKey: PostboxViewKey = .preferences(keys: Set([stickerSettingsKey, autoplayKey]))
         let preferencesView = context.account.postbox.combinedView(keys: [preferencesKey])
         
         let previousEntries:Atomic<[AppearanceWrapperEntry<InstalledStickerPacksEntry>]> = Atomic(value: [])
         let initialSize = self.atomicSize
         
-        let signal = combineLatest(queue: queue, statePromise.get(), stickerPacks, featured, appearanceSignal, preferencesView)
-            |> map { state, view, featured, appearance, preferencesView -> TableUpdateTransition in
+        let signal = combineLatest(queue: prepareQueue, statePromise.get(), stickerPacks, featured, archivedPromise.get(), appearanceSignal, preferencesView)
+            |> map { state, view, featured, archived, appearance, preferencesView -> TableUpdateTransition in
                 
                 var stickerSettings = StickerSettings.defaultSettings
                 if let view = preferencesView.views[preferencesKey] as? PreferencesView {
@@ -361,7 +429,14 @@ class InstalledStickerPacksController: TableViewController {
                     }
                 }
                 
-                let entries = installedStickerPacksControllerEntries(state: state, stickerSettings: stickerSettings, view: view, featured: featured).map {AppearanceWrapperEntry(entry: $0, appearance: appearance)}
+                var autoplayMedia = AutoplayMediaPreferences.defaultSettings
+                if let view = preferencesView.views[preferencesKey] as? PreferencesView {
+                    if let value = view.values[autoplayKey] as? AutoplayMediaPreferences {
+                        autoplayMedia = value
+                    }
+                }
+                
+                let entries = installedStickerPacksControllerEntries(state: state, autoplayMedia: autoplayMedia, stickerSettings: stickerSettings, view: view, featured: featured, archived: archived).map {AppearanceWrapperEntry(entry: $0, appearance: appearance)}
                 return prepareTransition(left: previousEntries.swap(entries), right: entries, initialSize: initialSize.modify({$0}), arguments: arguments)
         } |> afterDisposed {
             actionsDisposable.dispose()
@@ -401,7 +476,7 @@ class InstalledStickerPacksController: TableViewController {
                         
                         
                         let fromEntry = entries[fromIndex]
-                        guard case let .pack(_, _, fromPackInfo, _, _, _, _) = fromEntry else {
+                        guard case let .pack(_, _, fromPackInfo, _, _, _, _, _, _) = fromEntry else {
                             return
                         }
                         
@@ -410,7 +485,7 @@ class InstalledStickerPacksController: TableViewController {
                         var afterAll = false
                         if toIndex < entries.count {
                             switch entries[toIndex] {
-                            case let .pack(_, _, toPackInfo, _, _, _, _):
+                            case let .pack(_, _, toPackInfo, _, _, _, _, _, _):
                                 referenceId = toPackInfo.id
                             default:
                                 if entries[toIndex] < fromEntry {

@@ -6,7 +6,7 @@
 //  Copyright © 2018 Telegram. All rights reserved.
 //
 import Zip
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 enum ArchiveStatus : Equatable {
     case none
@@ -83,7 +83,7 @@ private final class Archiver {
             let contents = source.contents
             if !contents.isEmpty {
                 do {
-                    try Zip.zipFiles(paths: contents, zipFilePath: destination, password: nil, compression: ZipCompression.DefaultCompression, progress: { progress in
+                    try Zip.zipFiles(paths: contents, zipFilePath: destination, password: nil, compression: ZipCompression.BestCompression, progress: { progress in
                         status.set(.progress(progress))
                     }, cancel: cancelToken)
                    status.set(.done(destination))

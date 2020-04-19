@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 class ReplyModel: ChatAccessoryModel {
 
     private let account:Account
@@ -52,9 +53,7 @@ class ReplyModel: ChatAccessoryModel {
             
             make(with: nil, display: false)
            
-//            if !isPinned {
-//                messageViewSignal = account.postbox.messageAtId(replyMessageId)
-//            }
+
             nodeReady.set( messageViewSignal |> deliverOn(Queue.mainQueue()) |> map { [weak self] message -> Bool in
                  self?.make(with: message, isLoading: false, display: true)
                  return message != nil
@@ -81,14 +80,14 @@ class ReplyModel: ChatAccessoryModel {
                 for media in message.media {
                     if let image = media as? TelegramMediaImage {
                         if let representation = largestRepresentationForPhoto(image) {
-                            imageDimensions = representation.dimensions
+                            imageDimensions = representation.dimensions.size
                         }
                         break
                     } else if let file = media as? TelegramMediaFile, (file.isVideo || file.isSticker) {
                         if let dimensions = file.dimensions {
-                            imageDimensions = dimensions
+                            imageDimensions = dimensions.size
                         } else if let representation = largestImageRepresentation(file.previewRepresentations), !file.isStaticSticker {
-                            imageDimensions = representation.dimensions
+                            imageDimensions = representation.dimensions.size
                         } else if file.isAnimatedSticker {
                             imageDimensions = NSMakeSize(30, 30)
                         }
@@ -116,7 +115,7 @@ class ReplyModel: ChatAccessoryModel {
     }
     
     private func updateImageIfNeeded() {
-        if let message = self.replyMessage, let view = self.view, view.frame != NSZeroRect {
+        if let message = self.replyMessage, let view = self.view {
             var updatedMedia: Media?
             var imageDimensions: CGSize?
             var hasRoundImage = false
@@ -125,16 +124,16 @@ class ReplyModel: ChatAccessoryModel {
                     if let image = media as? TelegramMediaImage {
                         updatedMedia = image
                         if let representation = largestRepresentationForPhoto(image) {
-                            imageDimensions = representation.dimensions
+                            imageDimensions = representation.dimensions.size
                         }
                         break
                     } else if let file = media as? TelegramMediaFile, (file.isVideo || file.isSticker) {
                         updatedMedia = file
                         
-                        if let dimensions = file.dimensions {
+                        if let dimensions = file.dimensions?.size {
                             imageDimensions = dimensions
                         } else if let representation = largestImageRepresentation(file.previewRepresentations) {
-                            imageDimensions = representation.dimensions
+                            imageDimensions = representation.dimensions.size
                         } else if file.isAnimatedSticker {
                             imageDimensions = NSMakeSize(30, 30)
                         }
@@ -159,7 +158,7 @@ class ReplyModel: ChatAccessoryModel {
                     view.addSubview(view.imageView!)
                 }
                 
-                view.imageView?.setFrameOrigin(super.leftInset + (self.isSideAccessory ? 10 : 0), floorToScreenPixels(scaleFactor: System.backingScale, self.topOffset + (self.size.height - self.topOffset - boundingSize.height)/2))
+                view.imageView?.setFrameOrigin(super.leftInset + (self.isSideAccessory ? 10 : 0), floorToScreenPixels(System.backingScale, self.topOffset + (max(34, self.size.height) - self.topOffset - boundingSize.height)/2))
                 
                 
                 let mediaUpdated = true
@@ -171,13 +170,13 @@ class ReplyModel: ChatAccessoryModel {
                         updateImageSignal = chatMessagePhotoThumbnail(account: self.account, imageReference: ImageMediaReference.message(message: MessageReference(message), media: image), scale: view.backingScaleFactor, synchronousLoad: true)
                     } else if let file = updatedMedia as? TelegramMediaFile {
                         if file.isVideo {
-                            updateImageSignal = chatMessageVideoThumbnail(account: self.account, fileReference: FileMediaReference.message(message: MessageReference(message), media: file), scale: view.backingScaleFactor, synchronousLoad: true)
+                            updateImageSignal = chatMessageVideoThumbnail(account: self.account, fileReference: FileMediaReference.message(message: MessageReference(message), media: file), scale: view.backingScaleFactor, synchronousLoad: false)
                         } else if file.isAnimatedSticker {
                             updateImageSignal = chatMessageAnimatedSticker(postbox: self.account.postbox, file: file, small: true, scale: view.backingScaleFactor, size: imageDimensions.aspectFitted(boundingSize))
                         } else if file.isSticker {
                             updateImageSignal = chatMessageSticker(postbox: self.account.postbox, file: file, small: true, scale: view.backingScaleFactor)
                         } else if let iconImageRepresentation = smallestImageRepresentation(file.previewRepresentations) {
-                            let tmpImage = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [iconImageRepresentation], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                            let tmpImage = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [iconImageRepresentation], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                             updateImageSignal = chatWebpageSnippetPhoto(account: self.account, imageReference: ImageMediaReference.message(message: MessageReference(message), media: tmpImage), scale: view.backingScaleFactor, small: true, synchronousLoad: true)
                         }
                     }
@@ -195,7 +194,7 @@ class ReplyModel: ChatAccessoryModel {
                         }
                     })
                     
-                    if let media = media as? TelegramMediaImage, self.autodownload {
+                    if let media = media as? TelegramMediaImage {
                         self.fetchDisposable.set(chatMessagePhotoInteractiveFetched(account: self.account, imageReference: ImageMediaReference.message(message: MessageReference(message), media: media)).start())
                     }
                     
@@ -227,12 +226,12 @@ class ReplyModel: ChatAccessoryModel {
 
         if let message = message {
             
-            var peer = message.author
+            var title: String? = message.author?.displayTitle
         
             for attr in message.attributes {
                 if let _ = attr as? SourceReferenceMessageAttribute {
                     if let info = message.forwardInfo {
-                        peer = info.author
+                        title = info.authorTitle
                     }
                     break
                 }
@@ -243,7 +242,7 @@ class ReplyModel: ChatAccessoryModel {
             if text.isEmpty {
                 text = serviceMessageText(message, account: account, isReplied: true)
             }
-            self.headerAttr = .initialize(string: !isPinned ? peer?.displayTitle : tr(L10n.chatHeaderPinnedMessage), color: presentation.title, font: .medium(.text))
+            self.headerAttr = .initialize(string: !isPinned ? title : L10n.chatHeaderPinnedMessage, color: presentation.title, font: .medium(.text))
             self.messageAttr = .initialize(string: text, color: message.media.isEmpty || message.media.first is TelegramMediaWebpage ? presentation.enabledText : presentation.disabledText, font: .normal(.text))
         } else {
             self.headerAttr = nil

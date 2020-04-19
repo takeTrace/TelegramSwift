@@ -7,10 +7,12 @@
 //
 
 import Foundation
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
+import SyncCore
 
 public func transformOutgoingMessageMedia(postbox: Postbox, network: Network, reference: AnyMediaReference, opportunistic: Bool) -> Signal<AnyMediaReference?, NoError> {
     switch reference.media {
@@ -63,7 +65,7 @@ public func transformOutgoingMessageMedia(postbox: Postbox, network: Network, re
                             if file.isVideo && file.isAnimated {
                                 thumbedFile = data.0.path + ".mp4"
                             } else {
-                                thumbedFile = data.0.path.appending(".\(file.fileName?.nsstring.pathExtension ?? data.1 ?? "jpg")")
+                                thumbedFile = data.0.path.appending(".\(file.fileName?.nsstring.pathExtension ?? data.1 ?? "mp4")")
                             }
                         }
                         
@@ -90,6 +92,9 @@ public func transformOutgoingMessageMedia(postbox: Postbox, network: Network, re
                             thumbImage = try? imageGenerator.copyCGImage(at: CMTime(seconds: 0.0, preferredTimescale: asset.duration.timescale), actualTime: nil)
    
                         }
+                        if thumbedFile != resource?.localFilePath {
+                            try? FileManager.default.removeItem(atPath: thumbedFile)
+                        }
                         
                         if let image = thumbImage {
                             
@@ -108,14 +113,13 @@ public func transformOutgoingMessageMedia(postbox: Postbox, network: Network, re
                                 if CGImageDestinationFinalize(colorDestination) {
                                     let thumbnailResource = LocalFileMediaResource(fileId: arc4random64())
                                     postbox.mediaBox.storeResourceData(thumbnailResource.id, data: mutableData as Data)
-                                    subscriber.putNext(AnyMediaReference.standalone(media: file.withUpdatedSize(Int(size ?? 0)).withUpdatedPreviewRepresentations([TelegramMediaImageRepresentation(dimensions: image.size, resource: thumbnailResource)])))
+                                    subscriber.putNext(AnyMediaReference.standalone(media: file.withUpdatedSize(Int(size ?? 0)).withUpdatedPreviewRepresentations([TelegramMediaImageRepresentation(dimensions: PixelDimensions(image.size), resource: thumbnailResource)])))
                                     
                                      return EmptyDisposable
                                 }
                             }
                         
                         }
-                        
                         
                         subscriber.putNext(AnyMediaReference.standalone(media: file.withUpdatedSize(Int(size ?? 0))))
                         subscriber.putCompletion()

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 
@@ -89,9 +90,23 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
             
         }, for: .Click)
         
+        
         progressView.onUserChanged = { [weak self] progress in
             self?.controller?.set(trackProgress: progress)
             self?.progressView.set(progress: CGFloat(progress), animated: false)
+        }
+        
+        var paused: Bool = false
+        
+        progressView.startScrobbling = { [weak self]  in
+            self?.controller?.pause()
+            paused = true
+        }
+        
+        progressView.endScrobbling = { [weak self]  in
+            if paused {
+                self?.controller?.play()
+            }
         }
         
         progressView.set(handler: { [weak self] control in
@@ -138,7 +153,7 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
         guard let window = kitWindow, let context = context else {return}
         let point = containerView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         if NSPointInRect(point, textView.frame) {
-            if let song = controller?.currentSong {
+            if let song = controller?.currentSong, controller is APChatMusicController {
                 switch song.stableId {
                 case let .message(message):
                     showPopover(for: textView, with: PlayerListController(audioPlayer: self, context: context, messageIndex: MessageIndex(message)), edge: .minX, inset: NSMakePoint((300 - textView.frame.width) / 2, -60))
@@ -352,7 +367,7 @@ class InlineAudioPlayerView: NavigationHeaderView, APDelegate {
         
         let w = (repeatControl.isHidden ? dismiss.frame.minX : repeatControl.frame.minX) - next.frame.maxX
         
-        //textView.centerY(x: next.frame.maxX + floorToScreenPixels(scaleFactor: backingScaleFactor, (w - textView.frame.width)/2), addition: -2)
+        //textView.centerY(x: next.frame.maxX + floorToScreenPixels(backingScaleFactor, (w - textView.frame.width)/2), addition: -2)
         
         textView.center()
         

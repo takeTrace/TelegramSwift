@@ -8,7 +8,7 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 private struct InputURLFormatterState : Equatable {
     let text: String
@@ -34,10 +34,12 @@ private func inputURLFormatterEntries(state: InputURLFormatterState) -> [InputDa
     entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
     
-    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.inputFormatterTextHeader), color: theme.colors.text, detectBold: true))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.inputFormatterTextHeader), data: InputDataGeneralTextData(color: theme.colors.text, viewType: .textTopItem)))
     index += 1
     
-    entries.append(InputDataEntry.desc(sectionId: sectionId, index: index, text: .plain(state.text), color: theme.colors.grayText, detectBold: true))
+    entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: InputDataIdentifier("_id_text"), equatable: nil, item: { initialSize, stableId in
+        return GeneralBlockTextRowItem(initialSize, stableId: stableId, viewType: .singleItem, text: state.text, font: .normal(.text))
+    }))
     index += 1
     
     
@@ -45,10 +47,10 @@ private func inputURLFormatterEntries(state: InputURLFormatterState) -> [InputDa
     sectionId += 1
     
     
-    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.inputFormatterURLHeader), color: theme.colors.text, detectBold: true))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.inputFormatterURLHeader), data: InputDataGeneralTextData(color: theme.colors.text, viewType: .textTopItem)))
     index += 1
     
-    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.url), error: nil, identifier: _id_input_url, mode: .plain, placeholder: nil, inputPlaceholder: L10n.inputFormatterURLHeader, filter: { $0 }, limit: 10000))
+    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.url), error: nil, identifier: _id_input_url, mode: .plain, data: InputDataRowData( viewType: .singleItem), placeholder: nil, inputPlaceholder: L10n.inputFormatterURLHeader, filter: { $0 }, limit: 10000))
     index += 1
 
     
@@ -58,7 +60,7 @@ private func inputURLFormatterEntries(state: InputURLFormatterState) -> [InputDa
     return entries
 }
 
-func InputURLFormatterModalController(string: String, defaultUrl: String? = nil, completion: @escaping(String) -> Void) -> InputDataModalController {
+func InputURLFormatterModalController(string: String, defaultUrl: String? = nil, completion: @escaping(String?) -> Void) -> InputDataModalController {
     
     
     let initialState = InputURLFormatterState(text: string, url: defaultUrl?.removingPercentEncoding)
@@ -103,11 +105,9 @@ func InputURLFormatterModalController(string: String, defaultUrl: String? = nil,
                 
             })
             
-            if let url = url {
-                completion(url)
-                close?()
-                return .none
-            }
+            completion(url)
+            close?()
+            return .none
             
             
         }
@@ -127,10 +127,13 @@ func InputURLFormatterModalController(string: String, defaultUrl: String? = nil,
     
     let modalInteractions = ModalInteractions(acceptTitle: L10n.modalOK, accept: { [weak controller] in
         controller?.validateInputValues()
-    }, cancelTitle: L10n.modalCancel)
+    }, drawBorder: true, singleButton: true)
     
     let modalController = InputDataModalController(controller, modalInteractions: modalInteractions)
     
+    controller.leftModalHeader = ModalHeaderData(image: theme.icons.modalClose, handler: { [weak modalController] in
+        modalController?.close()
+    })
     
     close = { [weak modalController] in
         modalController?.modal?.close()

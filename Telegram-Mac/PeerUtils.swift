@@ -7,8 +7,117 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SyncCore
+
+
+extension ChatListFilterPeerCategories {
+   
+    static let excludeRead = ChatListFilterPeerCategories(rawValue: 1 << 6)
+    static let excludeMuted = ChatListFilterPeerCategories(rawValue: 1 << 7)
+    static let excludeArchived = ChatListFilterPeerCategories(rawValue: 1 << 8)
+    
+    static let Namespace: Int32 = 10
+}
+
+
+final class TelegramFilterCategory : Peer {
+    
+    
+    
+    var id: PeerId
+    
+    var indexName: PeerIndexNameRepresentation
+    
+    var associatedPeerId: PeerId?
+    
+    var notificationSettingsPeerId: PeerId?
+    
+    func isEqual(_ other: Peer) -> Bool {
+        if let other = other as? TelegramFilterCategory {
+            return other.category == self.category
+        }
+        return false
+    }
+    
+    let category: ChatListFilterPeerCategories
+    
+    init(category: ChatListFilterPeerCategories) {
+        self.id = PeerId(namespace: 10, id: category.rawValue)
+        self.indexName = .title(title: "", addressName: "")
+        self.notificationSettingsPeerId = nil
+        self.category = category
+    }
+    
+    var displayTitle: String? {
+        if category == .contacts {
+            return L10n.chatListFilterContacts
+        }
+        if category == .nonContacts {
+            return L10n.chatListFilterNonContacts
+        }
+        if category == .groups {
+            return L10n.chatListFilterGroups
+        }
+        if category == .channels {
+            return L10n.chatListFilterChannels
+        }
+        if category == .bots {
+            return L10n.chatListFilterBots
+        }
+        if category == .excludeRead {
+            return L10n.chatListFilterReadChats
+        }
+        if category == .excludeMuted {
+            return L10n.chatListFilterMutedChats
+        }
+        if category == .excludeArchived {
+            return L10n.chatListFilterArchive
+        }
+        return nil
+    }
+    
+    var icon: EmptyAvatartType? {
+        if category == .contacts {
+            return .icon(colors: theme.colors.peerColors(5), icon: theme.icons.chat_filter_private_chats_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .nonContacts {
+            return .icon(colors: theme.colors.peerColors(1), icon: theme.icons.chat_filter_non_contacts_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .groups {
+            return .icon(colors: theme.colors.peerColors(2), icon: theme.icons.chat_filter_large_groups_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .channels {
+            return .icon(colors: theme.colors.peerColors(0), icon: theme.icons.chat_filter_channels_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .bots {
+            return .icon(colors: theme.colors.peerColors(6), icon: theme.icons.chat_filter_bots_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .excludeMuted {
+            return .icon(colors: theme.colors.peerColors(0), icon: theme.icons.chat_filter_muted_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .excludeRead {
+            return .icon(colors: theme.colors.peerColors(3), icon: theme.icons.chat_filter_read_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        if category == .excludeArchived {
+            return .icon(colors: theme.colors.peerColors(5), icon: theme.icons.chat_filter_archive_avatar, iconSize: NSMakeSize(24, 24), cornerRadius: nil)
+        }
+        return nil
+    }
+    
+    
+    init(decoder: PostboxDecoder) {
+        self.id = PeerId(0)
+        self.indexName = .title(title: "", addressName: "")
+        self.notificationSettingsPeerId = nil
+        self.category = []
+    }
+    func encode(_ encoder: PostboxEncoder) {
+        
+    }
+}
 
 extension Peer {
     
@@ -28,22 +137,7 @@ extension Peer {
     }
     
     
-    var peerSummaryTags: PeerSummaryCounterTags {
-        if let peer = self as? TelegramChannel {
-            switch peer.info {
-            case .group:
-                if let addressName = peer.addressName, !addressName.isEmpty {
-                    return [.publicGroups]
-                } else {
-                    return [.regularChatsAndPrivateGroups]
-                }
-            case .broadcast:
-                return [.channels]
-            }
-        } else {
-            return [.regularChatsAndPrivateGroups]
-        }
-    }
+
     
     var canSendMessage: Bool {
         if let channel = self as? TelegramChannel {
@@ -84,10 +178,60 @@ extension Peer {
         return nil
     }
     
+    var emptyAvatar: EmptyAvatartType? {
+        if let peer = self as? TelegramFilterCategory {
+            return peer.icon
+        }
+        return nil
+    }
+    
     public var displayTitle: String {
         switch self {
         case let user as TelegramUser:
-            return user.name.isEmpty ? tr(L10n.peerDeletedUser) : user.name
+            if user.firstName == nil && user.lastName == nil {
+                return L10n.peerDeletedUser
+            } else {
+                var name: String = ""
+                if let firstName = user.firstName {
+                    name += firstName
+                }
+                if let lastName = user.lastName {
+                    if user.firstName != nil {
+                        name += " "
+                    }
+                    name += lastName
+                }
+                return name
+            }
+        case let group as TelegramGroup:
+            return group.title
+        case let channel as TelegramChannel:
+            return channel.title
+        case let filter as TelegramFilterCategory:
+            return filter.displayTitle ?? ""
+        default:
+            return ""
+        }
+    }
+    
+    var rawDisplayTitle: String {
+        switch self {
+        case let user as TelegramUser:
+            if user.firstName == nil && user.lastName == nil {
+                return ""
+            } else {
+                var name: String = ""
+                if let firstName = user.firstName {
+                    name += firstName
+                }
+                if let lastName = user.lastName {
+                    if user.firstName != nil {
+                        name += " "
+                    }
+                    name += lastName
+                }
+                return name
+            }
         case let group as TelegramGroup:
             return group.title
         case let channel as TelegramChannel:
@@ -111,6 +255,8 @@ extension Peer {
             return group.title
         case let channel as TelegramChannel:
             return channel.title
+        case let filter as TelegramFilterCategory:
+            return filter.displayTitle ?? ""
         default:
             return ""
         }

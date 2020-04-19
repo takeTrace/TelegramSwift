@@ -13,6 +13,47 @@ protocol InputDataRowDataValue {
     var value: InputDataValue { get }
 }
 
+enum InputDataRightItemAction : Equatable {
+    static func == (lhs: InputDataRightItemAction, rhs: InputDataRightItemAction) -> Bool {
+        switch lhs {
+        case .clearText:
+            if case .clearText = rhs {
+                return true
+            } else {
+                return false
+            }
+        case .resort:
+            if case .resort = rhs {
+                return true
+            } else {
+                return false
+            }
+        case .none:
+            if case .none = rhs {
+                return true
+            } else {
+                return false
+            }
+        case .custom:
+            if case .custom = rhs {
+                return true
+            } else {
+                return false
+            }
+        }
+    }
+    
+    case clearText
+    case resort
+    case custom(()->Void)
+    case none
+}
+
+enum InputDataRightItem : Equatable {
+    case action(CGImage, InputDataRightItemAction)
+    case loading
+}
+
 class InputDataRowItem: GeneralRowItem, InputDataRowDataValue {
 
     fileprivate let placeholderLayout: TextViewLayout?
@@ -22,11 +63,11 @@ class InputDataRowItem: GeneralRowItem, InputDataRowDataValue {
     fileprivate let inputPlaceholder: NSAttributedString
     fileprivate let filter:(String)->String
     let limit:Int32
-    private let updated:()->Void
+    private let updated:(String)->Void
     fileprivate(set) var currentText: String = "" {
         didSet {
             if currentText != oldValue {
-                updated()
+                updated(currentText)
             }
         }
     }
@@ -40,31 +81,84 @@ class InputDataRowItem: GeneralRowItem, InputDataRowDataValue {
     }
     
     fileprivate var inputHeight: CGFloat = 21
-    override var height: CGFloat {
-        var height = inputHeight + 8
-        if let errorLayout = errorLayout  {
-            height += (height == 42 ? errorLayout.layoutSize.height : errorLayout.layoutSize.height / 2)
+    fileprivate var realInputHeight: CGFloat = 21
+    
+    override var inset: NSEdgeInsets {
+        var inset = super.inset
+        switch viewType {
+        case .legacy:
+            break
+        case .modern:
+            if let errorLayout = errorLayout {
+                inset.bottom += errorLayout.layoutSize.height + 4
+            }
         }
-        return height
+        return inset
     }
+
+    override var height: CGFloat {
+        switch viewType {
+        case .legacy:
+            var height = inputHeight + 8
+            if let errorLayout = errorLayout  {
+                height += (height == 42 ? errorLayout.layoutSize.height : errorLayout.layoutSize.height / 2)
+            }
+            return height
+        case let .modern(_, insets):
+            var inputHeight = realInputHeight
+            switch self.mode {
+            case .plain:
+                break
+            case .secure:
+                inputHeight -= 6
+            }
+            let height = inputHeight + insets.top + insets.bottom + inset.top + inset.bottom
+//            if let errorLayout = errorLayout  {
+//                height += errorLayout.layoutSize.height + 4
+//            }
+            return height
+        }
+       
+    }
+    fileprivate let defaultText: String?
     fileprivate let mode: InputDataInputMode
-    init(_ initialSize: NSSize, stableId: AnyHashable, mode: InputDataInputMode, error: InputDataValueError?, currentText: String, placeholder: InputDataInputPlaceholder?, inputPlaceholder: String, filter:@escaping(String)->String, updated:@escaping()->Void, limit: Int32) {
+    fileprivate let rightItem: InputDataRightItem?
+    fileprivate let pasteFilter:((String)->(Bool, String))?
+    private let maxBlockWidth: CGFloat?
+    init(_ initialSize: NSSize, stableId: AnyHashable, mode: InputDataInputMode, error: InputDataValueError?, viewType: GeneralViewType = .legacy, currentText: String, placeholder: InputDataInputPlaceholder?, inputPlaceholder: String, defaultText: String? = nil, rightItem: InputDataRightItem? = nil, insets: NSEdgeInsets = NSEdgeInsets(left: 30.0, right: 30.0), maxBlockWidth: CGFloat? = nil, filter:@escaping(String)->String, updated:@escaping(String)->Void, pasteFilter:((String)->(Bool, String))? = nil, limit: Int32) {
         self.filter = filter
         self.limit = limit
         self.updated = updated
         self.placeholder = placeholder
-        self.inputPlaceholder = .initialize(string: inputPlaceholder, color: theme.colors.grayText, font: .normal(.text))
+        self.pasteFilter = pasteFilter
+        self.defaultText = defaultText
+        self.maxBlockWidth = maxBlockWidth
+        self.rightItem = rightItem
+        let holder = NSMutableAttributedString()
+        switch mode {
+        case .secure:
+            holder.append(.initialize(string: inputPlaceholder, color: theme.colors.grayText, font: .light(.text)))
+        case .plain:
+            holder.append(.initialize(string: inputPlaceholder, color: theme.colors.grayText, font: .normal(.text)))
+        }
+        self.inputPlaceholder = holder
         placeholderLayout = placeholder?.placeholder != nil ? TextViewLayout(.initialize(string: placeholder!.placeholder!, color: theme.colors.text, font: .normal(.text)), maximumNumberOfLines: 1) : nil
     
         self.currentText = currentText
         self.mode = mode
-        super.init(initialSize, stableId: stableId, error: error)
-        
-       
-        //.initialize(string: currentText, font: .normal(.text), coreText: false)
+    
+        super.init(initialSize, stableId: stableId, viewType: viewType, inset: insets, error: error)
         
        
         _ = makeSize(initialSize.width, oldWidth: oldWidth)
+    }
+    
+    override var blockWidth: CGFloat {
+        if let maxBlockWidth = maxBlockWidth {
+            return min(maxBlockWidth, super.blockWidth)
+        } else {
+            return super.blockWidth
+        }
     }
     
     var textFieldLeftInset: CGFloat {
@@ -73,7 +167,7 @@ class InputDataRowItem: GeneralRowItem, InputDataRowDataValue {
                 return 102
             } else {
                 if let icon = placeholder.icon {
-                    return icon.backingSize.width + 6
+                    return icon.backingSize.width + 6 + placeholder.insets.left
                 } else {
                     return -2
                 }
@@ -87,9 +181,15 @@ class InputDataRowItem: GeneralRowItem, InputDataRowDataValue {
         return true
     }
     
+    func calculateHeight() {
+        _ = self.makeSize(self.width, oldWidth: self.width)
+    }
+    
+    private(set) fileprivate var additionRightInset: CGFloat = 0
+    
     override func makeSize(_ width: CGFloat, oldWidth: CGFloat) -> Bool {
         let currentAttributed: NSMutableAttributedString = NSMutableAttributedString()
-        _ = currentAttributed.append(string: currentText, font: .normal(.text))
+        _ = currentAttributed.append(string: (defaultText ?? "") + currentText, font: .normal(.text))
         
         if mode == .secure {
             currentAttributed.setAttributedString(.init(string: String(currentText.map { _ in return "•" })))
@@ -98,18 +198,40 @@ class InputDataRowItem: GeneralRowItem, InputDataRowDataValue {
         
         let textStorage = NSTextStorage(attributedString: currentAttributed)
         
-        var additionalRightInset: CGFloat = 0
-        if let image = placeholder?.rightResoringImage {
-            additionalRightInset += image.backingSize.width + 6
+        if let rightItem = self.rightItem {
+            switch rightItem {
+            case .loading:
+                self.additionRightInset = 20
+            case let .action(icon, _):
+                self.additionRightInset = icon.backingSize.width + 2
+            }
+        } else {
+            self.additionRightInset = 0
         }
         
-        let textContainer = NSTextContainer(size: NSMakeSize(initialSize.width - inset.left - inset.right - textFieldLeftInset - additionalRightInset, .greatestFiniteMagnitude))
-        let layoutManager = NSLayoutManager()
-        layoutManager.addTextContainer(textContainer)
-        textStorage.addLayoutManager(layoutManager)
-        layoutManager.ensureLayout(for: textContainer)
-        
-        inputHeight = max(34, layoutManager.usedRect(for: textContainer).height + 6)
+        switch viewType {
+        case .legacy:
+            let textContainer = NSTextContainer(size: NSMakeSize(initialSize.width - inset.left - inset.right - textFieldLeftInset - additionRightInset, .greatestFiniteMagnitude))
+            let layoutManager = NSLayoutManager()
+            layoutManager.addTextContainer(textContainer)
+            textStorage.addLayoutManager(layoutManager)
+            layoutManager.ensureLayout(for: textContainer)
+            self.realInputHeight = max(34, layoutManager.usedRect(for: textContainer).height + 6)
+            inputHeight = max(34, layoutManager.usedRect(for: textContainer).height + 6)
+        case let .modern(_, insets):
+            let textContainer = NSTextContainer(size: NSMakeSize(self.blockWidth - insets.left - insets.right - textFieldLeftInset - additionRightInset, .greatestFiniteMagnitude))
+            let layoutManager = NSLayoutManager()
+            layoutManager.addTextContainer(textContainer)
+            textStorage.addLayoutManager(layoutManager)
+            layoutManager.ensureLayout(for: textContainer)
+            switch self.mode {
+            case .plain:
+                self.realInputHeight = max(16, layoutManager.usedRect(for: textContainer).height)
+            case .secure:
+                self.realInputHeight = max(22, layoutManager.usedRect(for: textContainer).height)
+            }
+            inputHeight = max(34, layoutManager.usedRect(for: textContainer).height + 1)
+        }
         
         let success = super.makeSize(width, oldWidth: oldWidth)
         placeholderLayout?.measure(width: 100)
@@ -137,31 +259,32 @@ private final class InputDataSecureField : NSSecureTextField {
 }
 
 
-final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFieldDelegate {
+class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFieldDelegate {
+    internal let containerView = GeneralRowContainerView(frame: NSZeroRect)
     private let placeholderTextView = TextView()
-    private let resortingView: ImageButton = ImageButton()
-    private var placeholderAction: ImageButton = ImageButton()
-    private let textView: TGModernGrowingTextView = TGModernGrowingTextView(frame: NSZeroRect, unscrollable: true)
+    private let rightActionView: ImageButton = ImageButton()
+    private var loadingView: ProgressIndicator? = nil
+    private var placeholderAction: ImageButton?
+    internal let textView: TGModernGrowingTextView = TGModernGrowingTextView(frame: NSZeroRect, unscrollable: true)
     private let secureField: InputDataSecureField = InputDataSecureField(frame: NSMakeRect(0, 0, 100, 16))
     private let textLimitation: TextViewLabel = TextViewLabel(frame: NSMakeRect(0, 0, 16, 14))
     private let separator: View = View()
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(placeholderAction)
-        addSubview(placeholderTextView)
-        addSubview(textView)
-        addSubview(secureField)
-        addSubview(separator)
-        addSubview(resortingView)
-        addSubview(textLimitation)
-        placeholderAction.autohighlight = false
-        resortingView.autohighlight = false
+        containerView.addSubview(placeholderTextView)
+        containerView.addSubview(textView)
+        containerView.addSubview(secureField)
+        containerView.addSubview(separator)
+        containerView.addSubview(textLimitation)
+        containerView.addSubview(rightActionView)
+        addSubview(containerView)
+        rightActionView.autohighlight = false
         
-        
+        containerView.userInteractionEnabled = false
         
         textLimitation.alignment = .right
         
-        resortingView.userInteractionEnabled = false
+        
         
     //    textView.max_height = 34
       // .isSingleLine = true
@@ -177,7 +300,7 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
         secureField.isEditable = true
         secureField.isSelectable = true
         
-    
+        textView.max_height = 10000
         
         secureField.font = .normal(.text)
         secureField.textView?.insertionPointColor = theme.colors.text
@@ -193,8 +316,8 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
         if !textView.isHidden {
             textView.shake()
             textView.setSelectedRange(NSMakeRange(0, textView.string().length))
-
         }
+        self.separator.shake()
     }
     
     override func hasFirstResponder() -> Bool {
@@ -210,38 +333,110 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
     }
 
     
+    private var separatorFrame: NSRect {
+        
+        guard let item = item as? InputDataRowItem else { return NSZeroRect }
+        
+        switch item.viewType {
+        case .legacy:
+            if let placeholder = item.placeholder {
+                if placeholder.drawBorderAfterPlaceholder {
+                    return NSMakeRect(item.inset.left + item.textFieldLeftInset + 4, self.containerView.frame.height - .borderSize, self.containerView.frame.width - item.inset.left - item.inset.right - item.textFieldLeftInset - 4, .borderSize)
+                } else {
+                    return NSMakeRect(item.inset.left, self.containerView.frame.height - .borderSize, self.containerView.frame.width - item.inset.left - item.inset.right, .borderSize)
+                }
+            } else {
+                return NSMakeRect(item.inset.left, self.containerView.frame.height - .borderSize, self.containerView.frame.width - item.inset.left - item.inset.right, .borderSize)
+            }
+        case let .modern(_, innerInsets):
+            if let placeholder = item.placeholder {
+                if placeholder.drawBorderAfterPlaceholder {
+                    return NSMakeRect(innerInsets.left + item.textFieldLeftInset + 4, self.containerView.frame.height - .borderSize, self.containerView.frame.width - innerInsets.left - innerInsets.right - item.textFieldLeftInset - 4, .borderSize)
+                } else {
+                    return NSMakeRect(innerInsets.left, self.containerView.frame.height - .borderSize, self.containerView.frame.width - item.inset.left - innerInsets.right, .borderSize)
+                }
+            } else {
+                return NSMakeRect(innerInsets.left, self.containerView.frame.height - .borderSize, self.containerView.frame.width - innerInsets.left - innerInsets.right, .borderSize)
+            }
+        }
+    }
+    
     override func layout() {
         super.layout()
         guard let item = item as? InputDataRowItem else {return}
-        placeholderTextView.setFrameOrigin(item.inset.left, 14)
-        placeholderAction.setFrameOrigin(item.inset.left, 12)
         
-        
-        var additionalRightInset: CGFloat = 0
-        if let placeholder = item.placeholder {
-            if placeholder.drawBorderAfterPlaceholder {
-                separator.frame = NSMakeRect(item.inset.left + item.textFieldLeftInset + 4, frame.height - .borderSize, frame.width - item.inset.left - item.inset.right - item.textFieldLeftInset, .borderSize)
-            } else {
-                separator.frame = NSMakeRect(item.inset.left, frame.height - .borderSize, frame.width - item.inset.left - item.inset.right, .borderSize)
+        switch item.viewType {
+        case .legacy:
+            self.containerView.frame = bounds
+            placeholderTextView.setFrameOrigin(item.inset.left, 14)
+            placeholderAction?.setFrameOrigin(item.inset.left, 12)
+            
+            separator.frame = separatorFrame
+
+            if let rightItem = item.rightItem {
+                switch rightItem {
+                case .action:
+                    rightActionView.setFrameOrigin(NSMakePoint(self.containerView.frame.width - rightActionView.frame.width - item.inset.right + 4, 14))
+                default:
+                    break
+                }
             }
             
-            if let _ = placeholder.rightResoringImage {
-                resortingView.setFrameOrigin(NSMakePoint(frame.width - resortingView.frame.width - item.inset.right + 4, 14))
-                additionalRightInset += resortingView.frame.width + 6
+            secureField.setFrameSize(NSMakeSize(self.containerView.frame.width - item.inset.left - item.inset.right - item.textFieldLeftInset - item.additionRightInset, item.inputHeight))
+            secureField.setFrameOrigin(item.inset.left + item.textFieldLeftInset, 14)
+            
+            textView.setFrameSize(NSMakeSize(self.containerView.frame.width - item.inset.left - item.inset.right - item.textFieldLeftInset - item.additionRightInset, item.inputHeight))
+            textView.setFrameOrigin(item.inset.left + item.textFieldLeftInset - 3, 6)
+            
+            textLimitation.setFrameOrigin(NSMakePoint(self.containerView.frame.width - item.inset.right - textLimitation.frame.width + 4, self.containerView.frame.height - textLimitation.frame.height - 4))
+        case let .modern(position, innerInsets):
+            self.containerView.frame = NSMakeRect(floorToScreenPixels(backingScaleFactor, (frame.width - item.blockWidth) / 2), item.inset.top, item.blockWidth, frame.height - item.inset.bottom - item.inset.top)
+         
+            self.separator.isHidden = !position.border
+            
+            let textX = innerInsets.left + item.textFieldLeftInset - 3
+            
+            placeholderTextView.setFrameOrigin(NSMakePoint(innerInsets.left, innerInsets.top))
+            placeholderAction?.setFrameOrigin(NSMakePoint(innerInsets.left, innerInsets.top - 1))
+            
+            separator.frame = separatorFrame
+        
+            
+            if let rightItem = item.rightItem {
+                switch rightItem {
+                case .action:
+                    if item.realInputHeight <= 22 {
+                        rightActionView.centerY(x: self.containerView.frame.width - rightActionView.frame.width - innerInsets.right)
+                    } else {
+                        rightActionView.setFrameOrigin(NSMakePoint(self.containerView.frame.width - rightActionView.frame.width - innerInsets.right, innerInsets.top))
+                    }
+                case .loading:
+                    if let loadingView = loadingView  {
+                        if item.realInputHeight <= 16 {
+                            loadingView.centerY(x: self.containerView.frame.width - loadingView.frame.width - innerInsets.right)
+                        } else {
+                            loadingView.setFrameOrigin(NSMakePoint(self.containerView.frame.width - loadingView.frame.width - innerInsets.right, innerInsets.top))
+                        }
+                    }
+                }
             }
-        } else {
-            separator.frame = NSMakeRect(item.inset.left, frame.height - .borderSize, frame.width - item.inset.left - item.inset.right, .borderSize)
+            
+            
+            secureField.setFrameSize(NSMakeSize(item.blockWidth - innerInsets.left - innerInsets.right - item.textFieldLeftInset - item.additionRightInset, item.inputHeight))
+            secureField.setFrameOrigin(innerInsets.left + item.textFieldLeftInset + 1, innerInsets.top)
+            
+            textView.setFrameSize(NSMakeSize(item.blockWidth - innerInsets.left - innerInsets.right - item.textFieldLeftInset - item.additionRightInset, item.inputHeight))
+            
+            if item.realInputHeight <= 16 {
+                textView.setFrameOrigin(textX, innerInsets.top - 8)
+            } else {
+                textView.setFrameOrigin(textX, innerInsets.top )
+            }
+            
+            textLimitation.setFrameOrigin(NSMakePoint(item.blockWidth - innerInsets.right - textLimitation.frame.width, self.containerView.frame.height - innerInsets.bottom - textLimitation.frame.height))
+
+            
         }
-
-
-        secureField.setFrameSize(NSMakeSize(frame.width - item.inset.left - item.inset.right - item.textFieldLeftInset - additionalRightInset, item.inputHeight))
-        secureField.setFrameOrigin(item.inset.left + item.textFieldLeftInset, 14)
-
-        textView.setFrameSize(NSMakeSize(frame.width - item.inset.left - item.inset.right - item.textFieldLeftInset - additionalRightInset, item.inputHeight))
-        textView.setFrameOrigin(item.inset.left + item.textFieldLeftInset - 3, 6)
-        
-        textLimitation.setFrameOrigin(NSMakePoint(frame.width - item.inset.right - textLimitation.frame.width + 4, frame.height - textLimitation.frame.height - 4))
-        
     }
     
     public func maxCharactersLimit(_ textView: TGModernGrowingTextView!) -> Int32 {
@@ -252,7 +447,46 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
     }
     
     func textViewDidReachedLimit(_ textView: Any) {
-        NSSound.beep()
+        if let item = item as? InputDataRowItem {
+            switch item.mode {
+            case .plain:
+                self.textView.shake()
+            case .secure:
+                self.secureField.shake()
+            }
+        }
+        
+    }
+    
+    override func draw(_ layer: CALayer, in ctx: CGContext) {
+        
+    }
+    
+    func textViewDidPaste(_ pasteboard: NSPasteboard) -> Bool {
+        if let item = item as? InputDataRowItem, let pasteFilter = item.pasteFilter {
+            if let string = pasteboard.string(forType: .string)?.trimmed {
+                let value = pasteFilter(string)
+                let updatedText = item.filter(value.1)
+                if value.0 {
+                    switch item.mode {
+                    case .plain:
+                        textView.setString(updatedText)
+                    case .secure:
+                        secureField.stringValue = updatedText
+                    }
+                } else {
+                    switch item.mode {
+                    case .plain:
+                        textView.appendText(updatedText)
+                    case .secure:
+                        secureField.stringValue = secureField.stringValue + updatedText
+                    }
+                }
+                return true
+            }
+            
+        }
+        return false
     }
     
     func textViewHeightChanged(_ height: CGFloat, animated: Bool) {
@@ -261,21 +495,38 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
             item.inputHeight = height
             
             
-            textLimitation.change(pos: NSMakePoint(frame.width - item.inset.right - textLimitation.frame.width + 4, item.height - textLimitation.frame.height), animated: animated)
+            switch item.viewType {
+            case .legacy:
+                textLimitation.change(pos: NSMakePoint(containerView.frame.width - item.inset.right - textLimitation.frame.width + 4, item.height - textLimitation.frame.height), animated: animated)
+            case let .modern(_, insets):
+                textLimitation.change(pos: NSMakePoint(item.blockWidth - insets.right - textLimitation.frame.width , item.height - textLimitation.frame.height - insets.bottom), animated: animated)
+            }
+            
+            item.calculateHeight()
+            
+            change(size: NSMakeSize(item.width, item.height), animated: animated)
+
+            let containerRect: NSRect
+            switch item.viewType {
+            case .legacy:
+                containerRect = self.bounds
+            case .modern:
+                containerRect = NSMakeRect(floorToScreenPixels(backingScaleFactor, (frame.width - item.blockWidth) / 2), item.inset.top, item.blockWidth, item.height - item.inset.bottom - item.inset.top)
+            }
+            containerView.change(size: containerRect.size, animated: animated, corners: item.viewType.corners)
+            containerView.change(pos: containerRect.origin, animated: animated)
             
             if let placeholder = item.placeholder {
                 if placeholder.drawBorderAfterPlaceholder {
-                    separator.change(pos: NSMakePoint(item.inset.left + item.textFieldLeftInset + 4, frame.height - .borderSize), animated: animated)
+                    separator.change(pos: NSMakePoint(separator.frame.minX, self.containerView.frame.height - .borderSize), animated: animated)
                 } else {
-                    separator.change(pos: NSMakePoint(item.inset.left, frame.height - .borderSize), animated: animated)
+                    separator.change(pos: NSMakePoint(separator.frame.minX, self.containerView.frame.height - .borderSize), animated: animated)
                 }
             } else {
-                separator.change(pos: NSMakePoint(item.inset.left, frame.height - .borderSize), animated: animated)
+                separator.change(pos: NSMakePoint(separator.frame.minX, self.containerView.frame.height - .borderSize), animated: animated)
             }
             
             table.noteHeightOfRow(item.index, animated)
-
-            
         }
         
     }
@@ -309,6 +560,13 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
             } else {
                 item.currentText = string
             }
+            let prevInputHeight = item.realInputHeight
+            let prevHeight = item.inputHeight
+            item.calculateHeight()
+            if prevInputHeight != item.realInputHeight && prevHeight == item.inputHeight {
+                textViewHeightChanged(item.inputHeight, animated: true)
+            }
+            containerView.needsDisplay = true
         }
     }
     
@@ -323,6 +581,12 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
             } else {
                 item.currentText = string
             }
+            let prevInputHeight = item.realInputHeight
+            item.calculateHeight()
+            if prevInputHeight != item.realInputHeight {
+                textViewHeightChanged(item.inputHeight, animated: true)
+            }
+            containerView.needsDisplay = true
         }
     }
     
@@ -330,34 +594,39 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
         
     }
     
-    func textViewDidPaste(_ pasteboard: NSPasteboard) -> Bool {
-        if let item = item as? InputDataRowItem, let string = pasteboard.string(forType: .string) {
-            let updated = item.filter(string)
-            if updated == string {
-                return false
-            } else {
-                NSSound.beep()
-                shakeView()
-            }
-        }
-        return true
-    }
+//    func textViewDidPaste(_ pasteboard: NSPasteboard) -> Bool {
+//        if let item = item as? InputDataRowItem, let string = pasteboard.string(forType: .string) {
+//            let updated = item.filter(string)
+//            if updated == string {
+//                return false
+//            } else {
+//                NSSound.beep()
+//                shakeView()
+//            }
+//        }
+//        return true
+//    }
     
     override var backdorColor: NSColor {
         return theme.colors.background
     }
     
     override func updateColors() {
-        super.updateColors()
-        placeholderTextView.backgroundColor = theme.colors.background
+        placeholderTextView.backgroundColor = backdorColor
         textView.cursorColor = theme.colors.indicatorColor
         textView.textFont = .normal(.text)
         textView.textColor = theme.colors.text
-        textView.background = theme.colors.background
+        textView.setBackgroundColor(backdorColor)
         secureField.font = .normal(13)
-        secureField.backgroundColor = theme.colors.background
+        secureField.backgroundColor = backdorColor
         secureField.textColor = theme.colors.text
         separator.backgroundColor = theme.colors.border
+        containerView.backgroundColor = backdorColor
+        loadingView?.progressColor = theme.colors.grayText
+        guard let item = item as? InputDataRowItem else {
+            return
+        }
+        self.background = item.viewType.rowBackground
     }
     
  
@@ -388,39 +657,171 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
         return super.firstResponder
     }
     
+    func showPlaceholderActionTooltip(_ text: String) -> Void {
+        if let placeholderAction = placeholderAction {
+            tooltip(for: placeholderAction, text: text)
+        }
+    }
+    
     override func set(item: TableRowItem, animated: Bool) {
         
         guard let item = item as? InputDataRowItem else {return}
         
+        self.textView.animates = false
+        super.set(item: item, animated: animated)
+        self.textView.animates = true
+        
         placeholderTextView.isHidden = item.placeholderLayout == nil
         placeholderTextView.update(item.placeholderLayout)
-        placeholderAction.isHidden = item.placeholder?.icon == nil
         
-        
-        
-        resortingView.isHidden = item.placeholder?.rightResoringImage == nil
+        let containerRect: NSRect
+        switch item.viewType {
+        case .legacy:
+            containerRect = self.bounds
+        case .modern:
+            containerRect = NSMakeRect(floorToScreenPixels(backingScaleFactor, (frame.width - item.blockWidth) / 2), item.inset.top, item.blockWidth, item.height - item.inset.bottom - item.inset.top)
+        }
+        containerView.change(size: containerRect.size, animated: animated, corners: item.viewType.corners)
+        containerView.change(pos: containerRect.origin, animated: animated)
+
+        if let rightItem = item.rightItem {
+            switch rightItem {
+            case let .action(image, action):
+                rightActionView.set(image: image, for: .Normal)
+                _ = rightActionView.sizeToFit()
+                rightActionView.isHidden = false
+                loadingView?.removeFromSuperview()
+                loadingView = nil
+                rightActionView.removeAllHandlers()
+                switch action {
+                case .none:
+                    rightActionView.userInteractionEnabled = false
+                    rightActionView.autohighlight = false
+                case .resort:
+                    rightActionView.userInteractionEnabled = false
+                    rightActionView.autohighlight = false
+                case .clearText:
+                    rightActionView.userInteractionEnabled = true
+                    rightActionView.autohighlight = true
+                    rightActionView.set(handler: { [weak self] _ in
+                        self?.secureField.stringValue = ""
+                        self?.textView.setString("")
+                    }, for: .Click)
+                case let .custom(action):
+                    rightActionView.userInteractionEnabled = true
+                    rightActionView.autohighlight = true
+                    rightActionView.set(handler: { _ in
+                        action()
+                    }, for: .Click)
+                }
+            case .loading:
+                if loadingView == nil {
+                    loadingView = ProgressIndicator(frame: NSMakeRect(0, 0, 18, 18))
+                    loadingView?.progressColor = theme.colors.grayText
+                    containerView.addSubview(loadingView!)
+                }
+                rightActionView.isHidden = true
+            }
+        } else {
+            rightActionView.isHidden = true
+            loadingView?.removeFromSuperview()
+            loadingView = nil
+        }
         
         if let placeholder = item.placeholder {
             if let icon = placeholder.icon {
+                if placeholderAction == nil {
+                    self.placeholderAction = ImageButton()
+                    containerView.addSubview(self.placeholderAction!)
+                    if animated {
+                        placeholderAction!.layer?.animateAlpha(from: 0, to: 2, duration: 0.2)
+                        separator.change(size: separatorFrame.size, animated: animated)
+                        separator.change(pos: separatorFrame.origin, animated: animated)
+                    }
+                    
+                    switch item.viewType {
+                    case .legacy:
+                        textView._change(pos: NSMakePoint(item.inset.left + item.textFieldLeftInset - 3, 6), animated: animated)
+                    case let .modern(_, innerInsets):
+                        let textX = innerInsets.left + item.textFieldLeftInset - 3
+                        if item.realInputHeight <= 16 {
+                            textView._change(pos: NSMakePoint(textX, textView.frame.minY), animated: animated)
+                        } else {
+                            textView._change(pos: NSMakePoint(textX, textView.frame.minY), animated: animated)
+                        }
+                    }
+                    
+                }
+                guard let placeholderAction = self.placeholderAction else {
+                    return
+                }
                 placeholderAction.set(image: icon, for: .Normal)
+                placeholderAction.set(image: icon, for: .Highlight)
+                placeholderAction.set(image: icon, for: .Hover)
                 _ = placeholderAction.sizeToFit()
                 placeholderAction.removeAllHandlers()
                 placeholderAction.set(handler: { _ in
                     placeholder.action?()
                 }, for: .SingleClick)
-            }
-            if let resortingImage = placeholder.rightResoringImage {
-                resortingView.set(image: resortingImage, for: .Normal)
-                _ = resortingView.sizeToFit()
+            } else {
+                if animated {
+                    if let placeholderAction = placeholderAction {
+                        self.placeholderAction = nil
+                        placeholderAction.layer?.animateAlpha(from: 1, to: 0, duration: 0.2, removeOnCompletion: false, completion: { [weak placeholderAction] _ in
+                            placeholderAction?.removeFromSuperview()
+                        })
+                        separator.change(size: separatorFrame.size, animated: animated)
+                        separator.change(pos: separatorFrame.origin, animated: animated)
+                    }
+                } else {
+                    placeholderAction?.removeFromSuperview()
+                    placeholderAction = nil
+                }
+                
+                switch item.viewType {
+                case .legacy:
+                    textView._change(pos: NSMakePoint(item.inset.left + item.textFieldLeftInset - 3, 6), animated: animated)
+                case let .modern(_, innerInsets):
+                    let textX = innerInsets.left + item.textFieldLeftInset - 3
+                    if item.realInputHeight <= 16 {
+                        textView._change(pos: NSMakePoint(textX, textView.frame.minY), animated: animated)
+                    } else {
+                        textView._change(pos: NSMakePoint(textX, textView.frame.minY), animated: animated)
+                    }
+                }
             }
             
             if placeholder.hasLimitationText {
                 textLimitation.isHidden = item.currentText.length < item.limit / 3 * 2
                 textLimitation.attributedString = .initialize(string: "\(item.limit - Int32(item.currentText.length))", color: theme.colors.grayText, font: .normal(.small))
-                
-                
             } else {
                 textLimitation.isHidden = true
+            }
+        } else {
+            if animated {
+                if let placeholderAction = placeholderAction {
+                    self.placeholderAction = nil
+                    placeholderAction.layer?.animateAlpha(from: 1, to: 0, duration: 0.2, removeOnCompletion: false, completion: { [weak placeholderAction] _ in
+                        placeholderAction?.removeFromSuperview()
+                    })
+                    separator.change(size: separatorFrame.size, animated: animated)
+                    separator.change(pos: separatorFrame.origin, animated: animated)
+                }
+            } else {
+                placeholderAction?.removeFromSuperview()
+                placeholderAction = nil
+            }
+            
+            switch item.viewType {
+            case .legacy:
+                textView._change(pos: NSMakePoint(item.inset.left + item.textFieldLeftInset - 3, 6), animated: animated)
+            case let .modern(_, innerInsets):
+                let textX = innerInsets.left + item.textFieldLeftInset - 3
+                if item.realInputHeight <= 16 {
+                    textView._change(pos: NSMakePoint(textX, textView.frame.minY), animated: animated)
+                } else {
+                    textView._change(pos: NSMakePoint(textX, textView.frame.minY), animated: animated)
+                }
             }
         }
         
@@ -430,9 +831,14 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
             textView.isHidden = false
             textView.animates = false
             textView.setPlaceholderAttributedString(item.inputPlaceholder, update: false)
-            if item.currentText != textView.string() {
+            if textView.defaultText != (item.defaultText ?? "") {
+                textView.defaultText = item.defaultText ?? ""
+                textView.setString(item.currentText, animated: false)
+            } else if item.currentText != textView.string() {
                 textView.setString(item.currentText, animated: false)
             }
+            textView.update(false)
+            textView.needsDisplay = true
             textView.animates = true
         case .secure:
             secureField.placeholderAttributedString = item.inputPlaceholder
@@ -444,9 +850,8 @@ final class InputDataRowView : GeneralRowView, TGModernGrowingDelegate, NSTextFi
             }
         }
         
-        super.set(item: item, animated: animated)
+        containerView.needsDisplay = true
+        self.needsLayout = true
 
-        
-        needsLayout = true
     }
 }

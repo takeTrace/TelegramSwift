@@ -8,19 +8,20 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 import LocalAuthentication
 
 private enum PasscodeEntry : Comparable, Identifiable {
-    case turnOn(sectionId:Int)
-    case turnOff(sectionId:Int, current: String)
-    case turnOnDescription(sectionId:Int)
-    case turnOffDescription(sectionId:Int)
-    case change(sectionId:Int, current: String)
-    case autoLock(sectionId:Int, time:Int32?)
-    case turnTouchId(sectionId:Int, enabled: Bool)
+    case turnOn(sectionId:Int, viewType: GeneralViewType)
+    case turnOff(sectionId:Int, current: String, viewType: GeneralViewType)
+    case turnOnDescription(sectionId:Int, viewType: GeneralViewType)
+    case turnOffDescription(sectionId:Int, viewType: GeneralViewType)
+    case change(sectionId:Int, current: String, viewType: GeneralViewType)
+    case autoLock(sectionId:Int, time:Int32?, viewType: GeneralViewType)
+    case turnTouchId(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
     case section(sectionId:Int)
     
     var stableId:Int {
@@ -46,19 +47,19 @@ private enum PasscodeEntry : Comparable, Identifiable {
     
     var stableIndex:Int {
         switch self {
-        case let .turnOn(sectionId):
+        case let .turnOn(sectionId, _):
             return (sectionId * 1000) + stableId
-        case let .turnOff(sectionId, _):
+        case let .turnOff(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .turnOnDescription(sectionId):
+        case let .turnOnDescription(sectionId, _):
             return (sectionId * 1000) + stableId
-        case let .turnOffDescription(sectionId):
+        case let .turnOffDescription(sectionId, _):
             return (sectionId * 1000) + stableId
-        case let .change(sectionId, _):
+        case let .change(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .autoLock(sectionId, _):
+        case let .autoLock(sectionId, _, _):
             return (sectionId * 1000) + stableId
-        case let .turnTouchId(sectionId, _):
+        case let .turnTouchId(sectionId, _, _):
             return (sectionId * 1000) + stableId
         case let .section(sectionId):
             return (sectionId + 1) * 1000 - sectionId
@@ -72,7 +73,7 @@ private func <(lhs:PasscodeEntry, rhs:PasscodeEntry) -> Bool {
 
 
 
-private func passcodeSettinsEntry(_ passcode: PostboxAccessChallengeData, _ additional: AdditionalSettings) -> [PasscodeEntry] {
+private func passcodeSettinsEntry(_ passcode: PostboxAccessChallengeData, passcodeSettings: PasscodeSettings, _ additional: AdditionalSettings) -> [PasscodeEntry] {
     var entries:[PasscodeEntry] = []
     
     var sectionId:Int = 1
@@ -81,25 +82,27 @@ private func passcodeSettinsEntry(_ passcode: PostboxAccessChallengeData, _ addi
     
     switch passcode {
     case .none:
-        entries.append(.turnOn(sectionId: sectionId))
-        entries.append(.turnOnDescription(sectionId: sectionId))
+        entries.append(.turnOn(sectionId: sectionId, viewType: .singleItem))
+        entries.append(.turnOnDescription(sectionId: sectionId, viewType: .textBottomItem))
     case let .plaintextPassword(value), let .numericalPassword(value):
-        entries.append(.turnOff(sectionId: sectionId, current: value.value))
-        entries.append(.change(sectionId: sectionId, current: value.value))
-        entries.append(.turnOffDescription(sectionId: sectionId))
+        entries.append(.turnOff(sectionId: sectionId, current: value, viewType: .firstItem))
+        entries.append(.change(sectionId: sectionId, current: value, viewType: .lastItem))
+        entries.append(.turnOffDescription(sectionId: sectionId, viewType: .textBottomItem))
         
         entries.append(.section(sectionId: sectionId))
         sectionId += 1
         
-        entries.append(.autoLock(sectionId: sectionId, time: passcode.timeout))
-        
         let context = LAContext()
-         if context.canUseBiometric {
-            entries.append(.turnTouchId(sectionId: sectionId, enabled: additional.useTouchId))
+        entries.append(.autoLock(sectionId: sectionId, time: passcodeSettings.timeout, viewType: context.canUseBiometric ? .firstItem : .singleItem))
+        if context.canUseBiometric {
+            entries.append(.turnTouchId(sectionId: sectionId, enabled: additional.useTouchId, viewType: .lastItem))
         }
         
     }
     
+    entries.append(.section(sectionId: sectionId))
+    sectionId += 1
+
     
     return entries
 }
@@ -111,26 +114,26 @@ fileprivate func prepareTransition(left:[AppearanceWrapperEntry<PasscodeEntry>],
     let (removed, inserted, updated) = proccessEntriesWithoutReverse(left, right: right) { entry -> TableRowItem in
         switch entry.entry {
         case .section:
-            return GeneralRowItem(initialSize, height: 20, stableId: entry.stableId)
-        case .turnOn:
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeTurnOn), nameStyle: actionStyle, type: .none, action: { 
+            return GeneralRowItem(initialSize, height: 30, stableId: entry.stableId, viewType: .separator)
+        case let .turnOn(_, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeTurnOn), nameStyle: actionStyle, type: .none, viewType: viewType, action: {
                 arguments.turnOn()
             })
-        case let .turnOff(_, current):
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeTurnOff), nameStyle: actionStyle, type: .none, action: {
+        case let .turnOff(_, current, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeTurnOff), nameStyle: actionStyle, type: .none, viewType: viewType, action: {
                 arguments.turnOff(current)
             })
-        case let .change(_, current):
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeChange), nameStyle: actionStyle, type: .none, action: {
+        case let .change(_, current, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeChange), nameStyle: actionStyle, type: .none, viewType: viewType, action: {
                 arguments.change(current)
             })
-        case .turnOnDescription, .turnOffDescription:
-            return GeneralTextRowItem(initialSize, stableId: entry.stableId, text: L10n.passcodeControllerText)
-        case .turnTouchId(_, let enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeUseTouchId), type: .switchable(enabled), action: {
+        case let .turnOnDescription(_, viewType), let .turnOffDescription(_, viewType):
+            return GeneralTextRowItem(initialSize, stableId: entry.stableId, text: L10n.passcodeControllerText, viewType: viewType)
+        case let .turnTouchId(_, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: tr(L10n.passcodeUseTouchId), type: .switchable(enabled), viewType: viewType, action: {
                 arguments.toggleTouchId(!enabled)
             })
-        case let .autoLock(sectionId: _, time: time):
+        case let .autoLock(sectionId: _, time, viewType):
             
             var text:String
             if let time = time {
@@ -147,7 +150,7 @@ fileprivate func prepareTransition(left:[AppearanceWrapperEntry<PasscodeEntry>],
             } else {
                 text = tr(L10n.passcodeAutoLockDisabled)
             }
-            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: L10n.passcodeAutolock, type: .context(text), action: {
+            return GeneralInteractedRowItem(initialSize, stableId: entry.stableId, name: L10n.passcodeAutolock, type: .context(text), viewType: viewType, action: {
                 arguments.ifAway()
             })
         }
@@ -186,17 +189,9 @@ class PasscodeSettingsViewController: TableViewController {
     }
     
     func updateAwayTimeout(_ timeout:Int32?) {
-        disposable.set(context.sharedContext.accountManager.transaction { transaction -> Bool in
-            switch transaction.getAccessChallengeData() {
-            case .none:
-                break
-            case let .numericalPassword(passcode, _, attempts):
-                transaction.setAccessChallengeData(.numericalPassword(value: passcode, timeout: timeout, attempts: attempts))
-            case let .plaintextPassword(passcode, _, attempts):
-                transaction.setAccessChallengeData(.plaintextPassword(value: passcode, timeout: timeout, attempts: attempts))
-            }
-            return true
-        }.start())
+        disposable.set(updatePasscodeSettings(context.sharedContext.accountManager, {
+            $0.withUpdatedTimeout(timeout)
+        }).start())
     }
     
     func showIfAwayOptions() {
@@ -251,8 +246,8 @@ class PasscodeSettingsViewController: TableViewController {
        
         let previous:Atomic<[AppearanceWrapperEntry<PasscodeEntry>]> = Atomic(value: [])
         
-        genericView.merge(with: combineLatest(queue: self.queue, context.sharedContext.accountManager.accessChallengeData(), appearanceSignal, additionalSettings(accountManager: context.sharedContext.accountManager)) |> map { passcode, appearance, additional in
-            let entries = passcodeSettinsEntry(passcode.data, additional).map{AppearanceWrapperEntry(entry: $0, appearance: appearance)}
+        genericView.merge(with: combineLatest(queue: prepareQueue, context.sharedContext.accountManager.accessChallengeData(), passcodeSettingsView(context.sharedContext.accountManager), appearanceSignal, additionalSettings(accountManager: context.sharedContext.accountManager)) |> map { passcode, passcodeSettings, appearance, additional in
+            let entries = passcodeSettinsEntry(passcode.data, passcodeSettings: passcodeSettings, additional).map{AppearanceWrapperEntry(entry: $0, appearance: appearance)}
             return prepareTransition(left: previous.swap(entries), right: entries, initialSize: initialSize, arguments: arguments)
         } |> deliverOnMainQueue)
         

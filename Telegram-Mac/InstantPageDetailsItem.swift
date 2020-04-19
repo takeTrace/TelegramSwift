@@ -7,10 +7,11 @@
 //
 
 import Foundation
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 final class InstantPageDetailsItem: InstantPageItem {
     var hasLinks: Bool = false
@@ -161,7 +162,7 @@ func layoutDetailsItem(theme: InstantPageTheme, title: NSAttributedString, bound
     let titleHeight = max(44.0, titleSize.height + 26.0)
     var offset: CGFloat?
     for var item in titleItems {
-        var itemOffset = floorToScreenPixels(scaleFactor: System.backingScale, (titleHeight - item.frame.height) / 2.0)
+        var itemOffset = floorToScreenPixels(System.backingScale, (titleHeight - item.frame.height) / 2.0)
         if item is InstantPageTextItem {
             offset = itemOffset
         } else if let offset = offset {
@@ -295,7 +296,7 @@ final class InstantPageDetailsView: Control, InstantPageView {
         self.titleTileView.frame = self.titleTile.frame
         self.highlightedBackgroundView.frame = CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: size.width, height: self.item.titleHeight + .borderSize))
         self.buttonView.frame = CGRect(origin: CGPoint(), size: CGSize(width: size.width, height: self.item.titleHeight))
-        self.arrowView.frame = CGRect(x: inset, y: floorToScreenPixels(scaleFactor: backingScaleFactor, (self.item.titleHeight - 8.0) / 2.0) + 1.0, width: 13.0, height: 8.0)
+        self.arrowView.frame = CGRect(x: inset, y: floorToScreenPixels(backingScaleFactor, (self.item.titleHeight - 8.0) / 2.0) + 1.0, width: 13.0, height: 8.0)
         self.contentView.frame = CGRect(x: 0.0, y: self.item.titleHeight, width: size.width, height: self.item.frame.height - self.item.titleHeight)
         
         let lineSize = CGSize(width: self.frame.width - inset, height: .borderSize)
@@ -348,7 +349,7 @@ final class InstantPageDetailsArrowView : View {
     
     private var progress: CGFloat = 0.0
     private var targetProgress: CGFloat?
-    private var timer: SwiftSignalKitMac.Timer?
+    private var timer: SwiftSignalKit.Timer?
     
     init(color: NSColor, open: Bool) {
         self.color = color
@@ -379,7 +380,7 @@ final class InstantPageDetailsArrowView : View {
     }
     private func startTimer() {
         if timer == nil {
-            timer = SwiftSignalKitMac.Timer(timeout: 0.016, repeat: true, completion: { [weak self] in
+            timer = SwiftSignalKit.Timer(timeout: 0.016, repeat: true, completion: { [weak self] in
                 self?.displayLinkEvent()
             }, queue: Queue.mainQueue())
             timer?.start()

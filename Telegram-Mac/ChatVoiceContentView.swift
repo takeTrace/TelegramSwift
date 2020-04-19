@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 
 class ChatVoiceContentView: ChatAudioContentView {
@@ -70,7 +71,7 @@ class ChatVoiceContentView: ChatAudioContentView {
         if let parameters = parameters {
             return parameters.presentation.waveformForeground
         }
-        return theme.colors.blueFill
+        return theme.colors.accent
     }
     
     override func checkState() {
@@ -85,7 +86,7 @@ class ChatVoiceContentView: ChatAudioContentView {
                     switch song.state {
                     case let .playing(data):
                         waveformView.set(foregroundColor: wForegroundColor, backgroundColor: wBackgroundColor)
-                        let width = floorToScreenPixels(scaleFactor: backingScaleFactor, parameters.waveformWidth * CGFloat(data.progress))
+                        let width = floorToScreenPixels(backingScaleFactor, parameters.waveformWidth * CGFloat(data.progress))
                         waveformView.foregroundClipingView.change(size: NSMakeSize(width, waveformView.frame.height), animated: data.animated && !acceptDragging)
                         let layout = parameters.duration(for: data.current)
                         layout.measure(width: frame.width - 50)
@@ -93,7 +94,7 @@ class ChatVoiceContentView: ChatAudioContentView {
                         break
                     case let .fetching(progress, animated):
                         waveformView.set(foregroundColor: wForegroundColor, backgroundColor: wBackgroundColor)
-                        let width = floorToScreenPixels(scaleFactor: backingScaleFactor, parameters.waveformWidth * CGFloat(progress))
+                        let width = floorToScreenPixels(backingScaleFactor, parameters.waveformWidth * CGFloat(progress))
                         waveformView.foregroundClipingView.change(size: NSMakeSize(width, waveformView.frame.height), animated: animated && !acceptDragging)
                         durationView.update(parameters.durationLayout)
                     case .stoped, .waiting:
@@ -102,7 +103,7 @@ class ChatVoiceContentView: ChatAudioContentView {
                         durationView.update(parameters.durationLayout)
                     case let .paused(data):
                         waveformView.set(foregroundColor: wForegroundColor, backgroundColor: wBackgroundColor)
-                        let width = floorToScreenPixels(scaleFactor: backingScaleFactor, parameters.waveformWidth * CGFloat(data.progress))
+                        let width = floorToScreenPixels(backingScaleFactor, parameters.waveformWidth * CGFloat(data.progress))
                         waveformView.foregroundClipingView.change(size: NSMakeSize(width, waveformView.frame.height), animated: data.animated && !acceptDragging)
                         let layout = parameters.duration(for: data.current)
                         layout.measure(width: frame.width - 50)
@@ -216,7 +217,7 @@ class ChatVoiceContentView: ChatAudioContentView {
             for attr in parent.attributes {
                 if let attr = attr as? ConsumableContentMessageAttribute {
                     if !attr.consumed {
-                        let center = floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2.0)
+                        let center = floorToScreenPixels(backingScaleFactor, frame.height / 2.0)
                         ctx.setFillColor(parameters.presentation.activityBackground.cgColor)
                         ctx.fillEllipse(in: NSMakeRect(leftInset + parameters.durationLayout.layoutSize.width + 3, center + 8, 5, 5))
                     }
@@ -229,7 +230,7 @@ class ChatVoiceContentView: ChatAudioContentView {
 
     override func layout() {
         super.layout()
-        let center = floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2.0)
+        let center = floorToScreenPixels(backingScaleFactor, frame.height / 2.0)
         if let parameters = parameters as? ChatMediaVoiceLayoutParameters {
             waveformView.setFrameSize(parameters.waveformWidth, waveformView.frame.height)
         }

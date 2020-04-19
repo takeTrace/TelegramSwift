@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 
@@ -319,6 +320,9 @@ class ChatRowItem: TableRowItem {
                     return isBubbled
                 }
             }
+            if media is TelegramMediaDice {
+                return isBubbled
+            }
             if let media = media as? TelegramMediaMap {
                 if let liveBroadcastingTimeout = media.liveBroadcastingTimeout {
                     var time:TimeInterval = Date().timeIntervalSince1970
@@ -352,7 +356,6 @@ class ChatRowItem: TableRowItem {
     }
     
     var forwardNameInset:NSPoint {
-        
         var top:CGFloat = forwardHeaderInset.y
         
         if let header = forwardHeader, !isBubbled {
@@ -399,6 +402,9 @@ class ChatRowItem: TableRowItem {
                     }
                 }
             }
+        }
+        if chatInteraction.isGlobalSearchMessage {
+            return true
         }
         return false
     }
@@ -567,13 +573,19 @@ class ChatRowItem: TableRowItem {
         if let peer = peer {
             peers.append(peer)
         }
+        
+        guard let message = message else {
+            return false
+        }
+        
         if authorIsChannel {
             return false
         }
-        if let message = message, message.isScheduledMessage {
+        if message.isScheduledMessage || message.flags.contains(.Sending) || message.flags.contains(.Failed) || message.flags.contains(.Unsent) {
             return false
         }
-        if let info = message?.forwardInfo {
+        
+        if let info = message.forwardInfo {
             if let author = info.author {
                 peers.append(author)
             }
@@ -715,6 +727,9 @@ class ChatRowItem: TableRowItem {
                     return false //!message.text.isEmpty || (message.replyAttribute != nil && !file.isInstantVideo) || (message.forwardInfo != nil && !file.isInstantVideo)
                 }
             }
+            if media is TelegramMediaDice {
+                return false
+            }
             
             for attr in message.attributes {
                 if let _ = attr as? InlineBotMessageAttribute {
@@ -765,8 +780,8 @@ class ChatRowItem: TableRowItem {
     }
     
     let renderType: ChatItemRenderType
-    var modernBubbleImage:(CGImage, NSEdgeInsets)? = nil
-    var selectedBubbleImage:(CGImage, NSEdgeInsets)? = nil
+    var bubbleImage:(CGImage, NSEdgeInsets)? = nil
+    var bubbleBorderImage:(CGImage, NSEdgeInsets)? = nil
     
     private let downloadSettings: AutomaticMediaDownloadSettings
     
@@ -833,12 +848,20 @@ class ChatRowItem: TableRowItem {
             }
         }
         
-        if case let .MessageEntry(_message, _, _isRead, _renderType, _itemType, _fwdType, _, _, _) = object {
+        if case let .MessageEntry(_message, _, _isRead, _renderType, _itemType, _fwdType, _) = object {
             message = _message
             isRead = _isRead
             itemType = _itemType
             fwdType = _fwdType
             renderType = _renderType
+        }
+        
+        var stateOverlayTextColor: NSColor {
+            if let media = message?.media.first, media.isInteractiveMedia {
+                 return NSColor(0xffffff)
+            } else {
+                return theme.chatServiceItemTextColor
+            }
         }
         
         var isStateOverlayLayout: Bool {
@@ -848,6 +871,9 @@ class ChatRowItem: TableRowItem {
                         return renderType == .bubble
                     }
                     
+                }
+                if media is TelegramMediaDice {
+                    return renderType == .bubble
                 }
                 if let media = media as? TelegramMediaMap {
                     if let liveBroadcastingTimeout = media.liveBroadcastingTimeout {
@@ -904,9 +930,10 @@ class ChatRowItem: TableRowItem {
                 } else {
                     isFull = false
                 }
-                
-                modernBubbleImage = messageBubbleImageModern(incoming: isIncoming, fillColor: presentation.chat.backgroundColor(isIncoming, object.renderType == .bubble), strokeColor: presentation.chat.bubbleBorderColor(isIncoming, renderType == .bubble), neighbors: isFull && !message.isHasInlineKeyboard ? .none : .both)
-                selectedBubbleImage = messageBubbleImageModern(incoming: isIncoming, fillColor: presentation.chat.backgoundSelectedColor(isIncoming, object.renderType == .bubble), strokeColor: presentation.chat.backgoundSelectedColor(isIncoming, renderType == .bubble), neighbors: isFull && !message.isHasInlineKeyboard ? .none : .both)
+                let icons = presentation.icons
+                let neighbors: MessageBubbleImageNeighbors = isFull && !message.isHasInlineKeyboard ? .none : .both
+                bubbleImage = isIncoming ? (neighbors == .none ? icons.chatBubble_none_incoming_withInset : icons.chatBubble_both_incoming_withInset) : (neighbors == .none ? icons.chatBubble_none_outgoing_withInset : icons.chatBubble_both_outgoing_withInset)
+                bubbleBorderImage = isIncoming ? (neighbors == .none ? icons.chatBubbleBorder_none_incoming_withInset : icons.chatBubbleBorder_both_incoming_withInset) : (neighbors == .none ? icons.chatBubbleBorder_none_outgoing_withInset : icons.chatBubbleBorder_both_outgoing_withInset)
             }
             
             self.itemType = itemType
@@ -935,7 +962,7 @@ class ChatRowItem: TableRowItem {
                 for attr in message.attributes {
                     if let attr = attr as? AuthorSignatureMessageAttribute {
                         if !message.flags.contains(.Failed) {
-                            postAuthorAttributed = .initialize(string: attr.signature, color: isStateOverlayLayout ? .white : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
+                            postAuthorAttributed = .initialize(string: attr.signature, color: isStateOverlayLayout ? stateOverlayTextColor : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
                         }
                         break
                     }
@@ -943,7 +970,7 @@ class ChatRowItem: TableRowItem {
             }
             if postAuthorAttributed == nil, ChatRowItem.authorIsChannel(message: message, account: context.account) {
                 if let author = message.forwardInfo?.authorSignature {
-                    postAuthorAttributed = .initialize(string: author, color: isStateOverlayLayout ? .white : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
+                    postAuthorAttributed = .initialize(string: author, color: isStateOverlayLayout ? stateOverlayTextColor : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
                 }
             }
             
@@ -989,6 +1016,11 @@ class ChatRowItem: TableRowItem {
                             
                             let appLink = inAppLink.peerInfo(link: "", peerId: author.id, action: nil, openChat: !(author is TelegramUser), postId: info.sourceMessageId?.id, callback: chatInteraction.openInfo)
                             attr.add(link: appLink, for: range, color: presentation.chat.linkColor(isIncoming, object.renderType == .bubble))
+                        } else {
+                            let range = attr.append(string: info.authorTitle, color: presentation.chat.linkColor(isIncoming, object.renderType == .bubble), font: .normal(.text))
+                            attr.add(link: inAppLink.callback("hid", { _ in
+                                hiddenFwdTooltip?()
+                            }), for: range)
                         }
                     } else {
                         if let source = info.source, source.isChannel {
@@ -1056,7 +1088,7 @@ class ChatRowItem: TableRowItem {
                     }
 
                     
-                    forwardNameLayout = TextViewLayout(attr, maximumNumberOfLines: renderType == .bubble ? 2 : 1, truncationType: .end)
+                    forwardNameLayout = TextViewLayout(attr, maximumNumberOfLines: renderType == .bubble ? 2 : 1, truncationType: .end, alwaysStaticItems: true)
                     forwardNameLayout?.interactions = globalLinkExecutor
                 }
             }
@@ -1140,7 +1172,7 @@ class ChatRowItem: TableRowItem {
             dateFormatter.dateStyle = .none
             dateFormatter.timeZone = NSTimeZone.local
             
-            date = TextNode.layoutText(maybeNode: nil, .initialize(string: dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(time))), color: isStateOverlayLayout ? .white : (!hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble)), font: renderType == .bubble ? .italic(.small) : .normal(.short)), nil, 1, .end, NSMakeSize(.greatestFiniteMagnitude, 20), nil, false, .left)
+            date = TextNode.layoutText(maybeNode: nil, .initialize(string: dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(time))), color: isStateOverlayLayout ? stateOverlayTextColor : (!hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble)), font: renderType == .bubble ? .italic(.small) : .normal(.short)), nil, 1, .end, NSMakeSize(.greatestFiniteMagnitude, 20), nil, false, .left)
 
         } else {
             self.isIncoming = false
@@ -1166,7 +1198,7 @@ class ChatRowItem: TableRowItem {
             
             for attribute in message.attributes {
                 if let attribute = attribute as? ReplyMessageAttribute, let replyMessage = message.associatedMessages[attribute.messageId]  {
-                    let replyPresentation = ChatAccessoryPresentation(background: hasBubble ? presentation.chat.backgroundColor(isIncoming, object.renderType == .bubble) : isBubbled ?   presentation.colors.grayForeground : presentation.colors.background, title: presentation.chat.replyTitle(self), enabledText: presentation.chat.replyText(self), disabledText: presentation.chat.replyDisabledText(self), border: presentation.chat.replyTitle(self))
+                    let replyPresentation = ChatAccessoryPresentation(background: hasBubble ? presentation.chat.backgroundColor(isIncoming, object.renderType == .bubble) : isBubbled ?  presentation.colors.grayForeground : presentation.colors.background, title: presentation.chat.replyTitle(self), enabledText: presentation.chat.replyText(self), disabledText: presentation.chat.replyDisabledText(self), border: presentation.chat.replyTitle(self))
                     
                     self.replyModel = ReplyModel(replyMessageId: attribute.messageId, account: context.account, replyMessage:replyMessage, autodownload: downloadSettings.isDownloable(replyMessage), presentation: replyPresentation, makesizeCallback: { [weak self] in
                         guard let `self` = self else {return}
@@ -1178,7 +1210,7 @@ class ChatRowItem: TableRowItem {
                     replyModel?.isSideAccessory = isBubbled && !hasBubble
                 }
                 if let attribute = attribute as? ViewCountMessageAttribute {
-                    channelViewsAttributed = .initialize(string: attribute.count.prettyNumber, color: isStateOverlayLayout ? .white : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
+                    channelViewsAttributed = .initialize(string: attribute.count.prettyNumber, color: isStateOverlayLayout ? stateOverlayTextColor : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short))
                     
                     if attribute.count >= 1000 {
                         fullDate = "\(attribute.count.separatedNumber) \(tr(L10n.chatMessageTooltipViews)), \(fullDate)"
@@ -1186,11 +1218,11 @@ class ChatRowItem: TableRowItem {
                 }
                 if let attribute = attribute as? EditedMessageAttribute {
                     if isEditMarkVisible {
-                        editedLabel = TextNode.layoutText(maybeNode: nil, .initialize(string: tr(L10n.chatMessageEdited), color: isStateOverlayLayout ? .white : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short)), nil, 1, .end, NSMakeSize(.greatestFiniteMagnitude, 20), nil, false, .left)
+                        editedLabel = TextNode.layoutText(maybeNode: nil, .initialize(string: tr(L10n.chatMessageEdited), color: isStateOverlayLayout ? stateOverlayTextColor : !hasBubble ? presentation.colors.grayText : presentation.chat.grayText(isIncoming, object.renderType == .bubble), font: renderType == .bubble ? .italic(.small) : .normal(.short)), nil, 1, .end, NSMakeSize(.greatestFiniteMagnitude, 20), nil, false, .left)
                     }
                     
                     let formatterEdited = DateFormatter()
-                    formatterEdited.dateStyle = .short
+                    formatterEdited.dateStyle = .medium
                     formatterEdited.timeStyle = .medium
                     formatterEdited.timeZone = NSTimeZone.local
                     fullDate = "\(fullDate) (\(formatterEdited.string(from: Date(timeIntervalSince1970: TimeInterval(attribute.date)))))"
@@ -1310,6 +1342,8 @@ class ChatRowItem: TableRowItem {
                     return ChatPollItem(initialSize, interaction, interaction.context, entry, downloadSettings, theme: theme)
                 } else if message.media.first is TelegramMediaUnsupported {
                     return ChatMessageItem(initialSize, interaction, interaction.context,entry, downloadSettings, theme: theme)
+                } else if message.media.first is TelegramMediaDice {
+                    return ChatMediaDice(initialSize, interaction, interaction.context, entry, downloadSettings, theme: theme)
                 }
                 
                 return ChatMediaItem(initialSize, interaction, interaction.context, entry, downloadSettings, theme: theme)
@@ -1322,9 +1356,8 @@ class ChatRowItem: TableRowItem {
     }
     
     override func makeSize(_ width: CGFloat, oldWidth:CGFloat) -> Bool {
-        
+                
         let result = super.makeSize(width, oldWidth: oldWidth)
-        
         isForceRightLine = false
         
         if let channelViewsAttributed = channelViewsAttributed {
@@ -1340,8 +1373,8 @@ class ChatRowItem: TableRowItem {
 
         func layout() -> Bool {
             if additionalLineForDateInBubbleState == nil && !isFixedRightPosition {
-                if _contentSize.width + rightSize.width + insetBetweenContentAndDate > widthForContent, replyMarkupModel == nil {
-                    widthForContent = _contentSize.width - 5
+                if _contentSize.width + rightSize.width + insetBetweenContentAndDate > widthForContent {
+                   // widthForContent = _contentSize.width - 5
                     self.isForceRightLine = true
                     //_contentSize = self.makeContentSize(widthForContent)
                     return true
@@ -1520,6 +1553,21 @@ class ChatRowItem: TableRowItem {
         return additionBubbleInset
     }
     
+    var maxTitleWidth: CGFloat {
+        let nameWidth:CGFloat
+        if hasBubble {
+            nameWidth = (authorText?.layoutSize.width ?? 0) + (isScam ? theme.icons.chatScam.backingSize.width + 3 : 0) + (adminBadge?.layoutSize.width ?? 0)
+        } else {
+            nameWidth = 0
+        }
+        let forwardWidth = hasBubble ? (forwardNameLayout?.layoutSize.width ?? 0) + (isForwardScam ? theme.icons.chatScam.backingSize.width + 3 : 0) : 0
+        
+        let replyWidth = hasBubble ? (replyModel?.size.width ?? 0) : 0
+
+        
+        return max(max(nameWidth, forwardWidth), replyWidth)
+    }
+    
     var bubbleFrame: NSRect {
         let nameWidth:CGFloat
         if hasBubble {
@@ -1530,7 +1578,7 @@ class ChatRowItem: TableRowItem {
         //hasBubble ? ((authorText?.layoutSize.width ?? 0) + (isScam ? theme.icons.chatScam.backingSize.width + 3 : 0) + (adminBadge?.layoutSize.width ?? 0)) : 0
         
         let forwardWidth = hasBubble ? (forwardNameLayout?.layoutSize.width ?? 0) + (isForwardScam ? theme.icons.chatScam.backingSize.width + 3 : 0) : 0
-        let replyWidth = hasBubble ? (replyModel?.size.width ?? 0) : 0
+        let replyWidth: CGFloat = hasBubble ? (replyModel?.size.width ?? 0) : 0
 
         var rect = NSMakeRect(defLeftInset, 2, contentSize.width, height - 4)
         
@@ -1582,7 +1630,13 @@ class ChatRowItem: TableRowItem {
         switch chatInteraction.chatLocation {
         case .peer:
             if let peer = peer {
-                chatInteraction.openInfo(peer.id, !(peer is TelegramUser), nil, nil)
+                let messageId: MessageId?
+                if chatInteraction.isGlobalSearchMessage {
+                    messageId = self.message?.id
+                } else {
+                    messageId = nil
+                }
+                chatInteraction.openInfo(peer.id, !(peer is TelegramUser), messageId, nil)
             }
         }
         
@@ -1640,6 +1694,36 @@ class ChatRowItem: TableRowItem {
         }
         return super.menuItems(in: location)
     }
+    
+    var stateOverlayBackgroundColor: NSColor {
+        guard let media = self.message?.media.first else {
+            return self.presentation.chatServiceItemColor
+        }
+        if media is TelegramMediaImage {
+            return self.presentation.colors.blackTransparent.withAlphaComponent(0.5)
+        } else if let media = media as? TelegramMediaFile, media.isVideo {
+            return self.presentation.colors.blackTransparent.withAlphaComponent(0.5)
+        } else {
+            return self.presentation.chatServiceItemColor
+        }
+    }
+    
+    var stateOverlayTextColor: NSColor {
+       guard let media = self.message?.media.first else {
+           return self.presentation.chatServiceItemTextColor
+       }
+       if media.isInteractiveMedia {
+            return NSColor(0xffffff)
+       } else {
+           return self.presentation.chatServiceItemTextColor
+       }
+    }
+    var isInteractiveMedia: Bool {
+        guard let media = self.message?.media.first else {
+            return false
+        }
+        return media.isInteractiveMedia
+    }
 }
 
 func chatMenuItems(for message: Message, chatInteraction: ChatInteraction) -> Signal<[ContextMenuItem], NoError> {
@@ -1657,12 +1741,12 @@ func chatMenuItems(for message: Message, chatInteraction: ChatInteraction) -> Si
     
 
     
-    if message.isScheduledMessage {
+    if message.isScheduledMessage, let peer = peer {
         items.append(ContextMenuItem(L10n.chatContextScheduledSendNow, handler: {
             _ = sendScheduledMessageNowInteractively(postbox: account.postbox, messageId: message.id).start()
         }))
         items.append(ContextMenuItem(L10n.chatContextScheduledReschedule, handler: {
-            showModal(with: ScheduledMessageModalController(context: context, defaultDate: Date(timeIntervalSince1970: TimeInterval(message.timestamp)) , scheduleAt: { date in
+            showModal(with: ScheduledMessageModalController(context: context, defaultDate: Date(timeIntervalSince1970: TimeInterval(message.timestamp)), peerId: peer.id, scheduleAt: { date in
                 _ = showModalProgress(signal: requestEditMessage(account: account, messageId: message.id, text: message.text, media: .keep, scheduleTime: Int32(date.timeIntervalSince1970)), for: context.window).start(next: { result in
                     
                 }, error: { error in
@@ -1747,7 +1831,7 @@ func chatMenuItems(for message: Message, chatInteraction: ChatInteraction) -> Si
     
     
     items.append(ContextMenuItem(tr(L10n.messageContextSelect), handler: {
-        chatInteraction.update({$0.withToggledSelectedMessage(message.id)})
+        chatInteraction.withToggledSelectedMessage({$0.withToggledSelectedMessage(message.id)})
     }))
     
 
@@ -1787,7 +1871,8 @@ func chatMenuItems(for message: Message, chatInteraction: ChatInteraction) -> Si
                 return items
             } |> mapToSignal { items in
                 var items = items
-                return account.postbox.mediaBox.resourceData(file.resource) |> deliverOnMainQueue |> mapToSignal { data in
+                
+                return combineLatest(queue: .mainQueue(), account.postbox.mediaBox.resourceData(file.resource), fileFinderPath(file, context.account.postbox)) |> mapToSignal { data, downloadPath in
                     if !file.isInteractiveMedia && !file.isVoice && !file.isMusic && !file.isStaticSticker && !file.isGraphicFile {
                         let quickLook = ContextMenuItem(L10n.contextOpenInQuickLook, handler: {
                             FastSettings.toggleOpenInQuickLook(fileExtenstion(file))
@@ -1801,24 +1886,31 @@ func chatMenuItems(for message: Message, chatInteraction: ChatInteraction) -> Si
                             saveAs(file, account: account)
                         }))
                         
-                        if !file.isVoice {
-                            let path = data.path + "." + fileExtenstion(file)
-                            try? FileManager.default.removeItem(atPath: path)
-                            try? FileManager.default.linkItem(atPath: data.path, toPath: path)
-                            let result = ObjcUtils.apps(forFileUrl: path)
-                            if let result = result, !result.isEmpty {
-                                let item = ContextMenuItem(L10n.messageContextOpenWith, handler: {})
-                                let menu = NSMenu()
-                                item.submenu = menu
-                                for item in result {
-                                    menu.addItem(ContextMenuItem(item.fullname, handler: {
-                                        NSWorkspace.shared.openFile(path, withApplication: item.app.path)
-                                    }, image: item.icon))
+                        if let downloadPath = downloadPath {
+                            if !file.isVoice {
+                                let path: String
+                                if FileManager.default.fileExists(atPath: downloadPath) {
+                                    path = downloadPath
+                                } else {
+                                    path = data.path + "." + fileExtenstion(file)
+                                    try? FileManager.default.removeItem(atPath: path)
+                                    try? FileManager.default.linkItem(atPath: data.path, toPath: path)
                                 }
-                                items.append(item)
+                                let result = ObjcUtils.apps(forFileUrl: path)
+                                if let result = result, !result.isEmpty {
+                                    let item = ContextMenuItem(L10n.messageContextOpenWith, handler: {})
+                                    let menu = NSMenu()
+                                    item.submenu = menu
+                                    for item in result {
+                                        menu.addItem(ContextMenuItem(item.fullname, handler: {
+                                            NSWorkspace.shared.openFile(path, withApplication: item.app.path)
+                                        }, image: item.icon))
+                                    }
+                                    items.append(item)
+                                }
                             }
-                            
                         }
+                        
                     }
                     
                     if file.isStaticSticker, let fileId = file.id {
@@ -1898,8 +1990,10 @@ func chatMenuItems(for message: Message, chatInteraction: ChatInteraction) -> Si
         var items = items
         if canReportMessage(message, account) {
             items.append(ContextMenuItem(L10n.messageContextReport, handler: {
-                _ = reportReasonSelector().start(next: { reason in
-                    _ = showModalProgress(signal: reportPeerMessages(account: account, messageIds: [message.id], reason: reason), for: mainWindow).start()
+                _ = reportReasonSelector(context: context).start(next: { reason in
+                    _ = showModalProgress(signal: reportPeerMessages(account: account, messageIds: [message.id], reason: reason), for: mainWindow).start(completed: {
+                        alert(for: context.window, info: L10n.messageContextReportAlertOK)
+                    })
                 })
             }))
         }

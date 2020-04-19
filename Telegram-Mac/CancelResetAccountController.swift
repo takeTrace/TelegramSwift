@@ -11,8 +11,9 @@ import Cocoa
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 private let _id_input_code = InputDataIdentifier("_id_input_code")
 
@@ -110,7 +111,7 @@ private func timeoutSignal(codeData: CancelAccountResetData) -> Signal<Int32?, N
             let value = Atomic<Int32>(value: timeout)
             subscriber.putNext(timeout)
             
-            let timer = SwiftSignalKitMac.Timer(timeout: 1.0, repeat: true, completion: {
+            let timer = SwiftSignalKit.Timer(timeout: 1.0, repeat: true, completion: {
                 subscriber.putNext(value.modify { value in
                     return max(0, value - 1)
                 })
@@ -137,7 +138,7 @@ private func cancelResetAccountEntries(state: CancelResetAccountState, data: Can
     sectionId += 1
     
 //
-    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.code), error: state.error, identifier: _id_input_code, mode: .plain, placeholder: nil, inputPlaceholder: L10n.twoStepAuthRecoveryCode, filter: {String($0.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0)})}, limit: state.limit))
+    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.code), error: state.error, identifier: _id_input_code, mode: .plain, data: InputDataRowData(), placeholder: nil, inputPlaceholder: L10n.twoStepAuthRecoveryCode, filter: {String($0.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0)})}, limit: state.limit))
     index += 1
     
     var nextOptionText = ""
@@ -153,7 +154,7 @@ private func cancelResetAccountEntries(state: CancelResetAccountState, data: Can
     if !nextOptionText.isEmpty {
         result += "\n\n" + nextOptionText
     }
-    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(result), color: theme.colors.grayText, detectBold: true))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(result), data: InputDataGeneralTextData()))
     
     entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
@@ -306,12 +307,19 @@ func cancelResetAccountController(account: Account, phone: String, data: CancelA
         }
     }, hasDone: true)
     
+    controller.getBackgroundColor = {
+        theme.colors.background
+    }
     
     let modalInteractions = ModalInteractions(acceptTitle: L10n.modalSend, accept: { [weak controller] in
         _ = controller?.returnKeyAction()
-    }, cancelTitle: L10n.modalCancel, drawBorder: true, height: 50)
+    }, drawBorder: true, height: 50, singleButton: true)
     
     let modalController = InputDataModalController(controller, modalInteractions: modalInteractions)
+    
+    controller.leftModalHeader = ModalHeaderData(image: theme.icons.modalClose, handler: { [weak modalController] in
+        modalController?.close()
+    })
     
     close = { [weak modalController] in
         modalController?.modal?.close()

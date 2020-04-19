@@ -8,9 +8,10 @@
 
 import Foundation
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 import LocalAuthentication
 extension Message {
     
@@ -1656,14 +1657,7 @@ func searchEmojiClue(query: String, postbox: Postbox) -> Signal<[EmojiClue], NoE
 
 func randomInt32() -> Int32 {
     let uRandom = arc4random()
-    let value: Int32
-    let dif = Int(uRandom) - Int(INT32_MAX)
-    if dif > 0 {
-        value = Int32(dif)
-    } else {
-        value = Int32(uRandom)
-    }
-    return value
+    return Int32(bitPattern: uRandom)
 }
 
 
@@ -2119,6 +2113,18 @@ public extension NSAttributedString {
         
         let modified: NSMutableAttributedString = string.mutableCopy() as! NSMutableAttributedString
         
+        
+        var index: Int = 1
+        while true {
+            let range = modified.string.nsstring.range(of: "\t0")
+            if range.location != NSNotFound {
+                modified.replaceCharacters(in: range, with: "\t\(index)")
+                index += 1
+            } else {
+                break
+            }
+        }
+        
         var attachments:[NSTextAttachment] = []
         
         string.enumerateAttributes(in: string.range, options: [], using: { attr, range, _ in
@@ -2272,5 +2278,49 @@ func transformedWithFitzModifier(data: Data, fitzModifier: EmojiFitzModifier?) -
         return string.data(using: .utf8) ?? data
     } else {
         return data
+    }
+}
+
+
+extension Double {
+    
+    func toString(decimal: Int = 9) -> String {
+        let value = decimal < 0 ? 0 : decimal
+        var string = String(format: "%.\(value)f", self)
+        
+        while string.last == "0" || string.last == "." {
+            if string.last == "." { string = String(string.dropLast()); break}
+            string = String(string.dropLast())
+        }
+        return string
+    }
+}
+
+
+public extension String {
+    func rightJustified(width: Int, pad: String = " ", truncate: Bool = false) -> String {
+        guard width > count else {
+            return truncate ? String(suffix(width)) : self
+        }
+        return String(repeating: pad, count: width - count) + self
+    }
+    
+    func leftJustified(width: Int, pad: String = " ", truncate: Bool = false) -> String {
+        guard width > count else {
+            return truncate ? String(prefix(width)) : self
+        }
+        return self + String(repeating: pad, count: width - count)
+    }
+}
+
+
+
+extension CGImage {
+    var data: Data? {
+        guard let mutableData = CFDataCreateMutable(nil, 0),
+            let destination = CGImageDestinationCreateWithData(mutableData, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, self, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return mutableData as Data
     }
 }

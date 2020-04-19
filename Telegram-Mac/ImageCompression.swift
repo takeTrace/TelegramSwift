@@ -7,11 +7,12 @@
 //
 
 import Cocoa
-import MtProtoKitMac
-import TelegramCoreMac
-import PostboxMac
-import TGUIKit
 
+import TelegramCore
+import SyncCore
+import Postbox
+import TGUIKit
+import MurMurHash32
 
 public struct TinyThumbnailData: Equatable {
     let tablesDataHash: Int32

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 
@@ -129,7 +130,7 @@ class ChatMessageItem: ChatRowItem {
             execute(inapp: link)
         } else if unsupported {
             #if APP_STORE
-            execute(inapp: inAppLink.external(link: "https://itunes.apple.com/us/app/telegram/id747648890", false))
+            execute(inapp: inAppLink.external(link: "https://apps.apple.com/us/app/telegram/id747648890", false))
             #else
             (NSApp.delegate as? AppDelegate)?.checkForUpdates("")
             #endif
@@ -192,7 +193,7 @@ class ChatMessageItem: ChatRowItem {
                 
                 messageAttr = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), mediaDuration: mediaDuration, timecode: { timecode in
                     openSpecificTimecodeFromReply?(timecode)
-                }).mutableCopy() as! NSMutableAttributedString
+                }, openBank: chatInteraction.openBank).mutableCopy() as! NSMutableAttributedString
 
                 messageAttr.fixUndefinedEmojies()
                 
@@ -276,17 +277,23 @@ class ChatMessageItem: ChatRowItem {
             }
             
             self.containsBigEmoji = containsBigEmoji
+            
+            if message.flags.contains(.Failed) || message.flags.contains(.Unsent) || message.flags.contains(.Sending) {
+                copy.detectLinks(type: [.Links, .Mentions, .Hashtags, .Commands], context: context, color: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), openInfo: chatInteraction.openInfo, hashtag: { _ in }, command: { _ in }, applyProxy: chatInteraction.applyProxy)
+            }
            
             self.messageText = copy
+           
            
             
             textLayout = TextViewLayout(self.messageText, selectText: theme.chat.selectText(isIncoming, entry.renderType == .bubble), strokeLinks: entry.renderType == .bubble && !containsBigEmoji, alwaysStaticItems: true, disableTooltips: false)
             textLayout.mayBlocked = entry.renderType != .bubble
             
-            if let highlightFoundText = entry.additionalData?.highlightFoundText {
+            if let highlightFoundText = entry.additionalData.highlightFoundText {
                 if highlightFoundText.isMessage {
-                    if let range = rangeOfSearch(highlightFoundText.query, in: copy.string) {
-                        textLayout.additionalSelections = [TextSelectedRange(range: range, color: theme.colors.blueIcon.withAlphaComponent(0.5), def: false)]
+                    let range = copy.string.lowercased().nsstring.range(of: highlightFoundText.query.lowercased())
+                    if range.location != NSNotFound {
+                        textLayout.additionalSelections = [TextSelectedRange(range: range, color: theme.colors.accentIcon.withAlphaComponent(0.5), def: false)]
                     }
                 } else {
                     var additionalSelections:[TextSelectedRange] = []
@@ -315,7 +322,7 @@ class ChatMessageItem: ChatRowItem {
             
             var media = message.media.first
             if let game = media as? TelegramMediaGame {
-                media = TelegramMediaWebpage(webpageId: MediaId(namespace: 0, id: 0), content: TelegramMediaWebpageContent.Loaded(TelegramMediaWebpageLoadedContent(url: "", displayUrl: "", hash: 0, type: "photo", websiteName: game.name, title: game.name, text: game.description, embedUrl: nil, embedType: nil, embedSize: nil, duration: nil, author: nil, image: game.image, file: game.file, files: nil, instantPage: nil)))
+                media = TelegramMediaWebpage(webpageId: MediaId(namespace: 0, id: 0), content: TelegramMediaWebpageContent.Loaded(TelegramMediaWebpageLoadedContent(url: "", displayUrl: "", hash: 0, type: "photo", websiteName: game.name, title: game.name, text: game.description, embedUrl: nil, embedType: nil, embedSize: nil, duration: nil, author: nil, image: game.image, file: game.file, attributes: [], instantPage: nil)))
             }
             
             self.wpPresentation = WPLayoutPresentation(text: theme.chat.textColor(isIncoming, entry.renderType == .bubble), activity: theme.chat.webPreviewActivity(isIncoming, entry.renderType == .bubble), link: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), selectText: theme.chat.selectText(isIncoming, entry.renderType == .bubble), ivIcon: theme.chat.instantPageIcon(isIncoming, entry.renderType == .bubble, presentation: theme), renderType: entry.renderType)
@@ -428,6 +435,10 @@ class ChatMessageItem: ChatRowItem {
                 selectManager.copy(selectManager)
                 return !selectManager.isEmpty
             }
+            interactions.copyToClipboard = { text in
+                copyToClipboard(text)
+                context.sharedContext.bindings.rootNavigation().controller.show(toaster: ControllerToaster(text: L10n.shareLinkCopied))
+            }
             interactions.menuItems = { [weak self] type in
                 var items:[ContextMenuItem] = []
                 if let strongSelf = self, let layout = self?.textLayout {
@@ -435,19 +446,30 @@ class ChatMessageItem: ChatRowItem {
                     let text: String
                     if let type = type {
                         text = copyContextText(from: type)
-                    } else {
-                        text = layout.selectedRange.hasSelectText ? tr(L10n.chatCopySelectedText) : tr(L10n.textCopy)
+                        items.append(ContextMenuItem(text, handler: {
+                            if let strongSelf = self {
+                                let pb = NSPasteboard.general
+                                pb.declareTypes([.string], owner: strongSelf)
+                                var effectiveRange = strongSelf.textLayout.selectedRange.range
+                                let selectedText = strongSelf.textLayout.attributedString.attributedSubstring(from: strongSelf.textLayout.selectedRange.range)
+                                let attribute = strongSelf.textLayout.attributedString.attribute(NSAttributedString.Key.link, at: strongSelf.textLayout.selectedRange.range.location, effectiveRange: &effectiveRange)
+                                if let attribute = attribute as? inAppLink {
+                                    pb.setString(attribute.link.isEmpty ? selectedText.string : attribute.link, forType: .string)
+                                } else {
+                                    pb.setString(selectedText.string, forType: .string)
+                                }
+                            }
+                        }))
+                        
                     }
                     
-                    
-                    items.append(ContextMenuItem(text, handler: { [weak strongSelf] in
-                        let result = strongSelf?.textLayout.interactions.copy?()
-                        if let result = result, let strongSelf = strongSelf, !result {
+                    items.append(ContextMenuItem(layout.selectedRange.hasSelectText ? L10n.chatCopySelectedText : L10n.textCopy, handler: {
+                        let result = self?.textLayout.interactions.copy?()
+                        if let result = result, let strongSelf = self, !result {
                             if strongSelf.textLayout.selectedRange.hasSelectText {
                                 let pb = NSPasteboard.general
                                 pb.declareTypes([.string], owner: strongSelf)
                                 var effectiveRange = strongSelf.textLayout.selectedRange.range
-                                
                                 let selectedText = strongSelf.textLayout.attributedString.attributedSubstring(from: strongSelf.textLayout.selectedRange.range)
                                 let isCopied = globalLinkExecutor.copyAttributedString(selectedText)
                                 if !isCopied {
@@ -463,6 +485,7 @@ class ChatMessageItem: ChatRowItem {
                             
                         }
                     }))
+                   
                     
                     if strongSelf.textLayout.selectedRange.hasSelectText {
                         var effectiveRange: NSRange = NSMakeRange(NSNotFound, 0)
@@ -532,21 +555,25 @@ class ChatMessageItem: ChatRowItem {
     }
     
     override var additionalLineForDateInBubbleState: CGFloat? {
+
         if containsBigEmoji {
             return rightSize.height + 3
         }
         if isForceRightLine {
             return rightSize.height
         }
-        if rightSize.width + insetBetweenContentAndDate + bubbleDefaultInnerInset + contentSize.width + 30 > self.width {
+        if unsupported {
             return rightSize.height
+        }
+        if rightSize.width + insetBetweenContentAndDate + bubbleDefaultInnerInset + contentSize.width + 30 > self.width {
+           // return rightSize.height
         }
        
         if let webpageLayout = webpageLayout {
             if let webpageLayout = webpageLayout as? WPArticleLayout {
                 if let textLayout = webpageLayout.textLayout {
                     if webpageLayout.hasInstantPage {
-                        return rightSize.height
+                        return rightSize.height + 4
                     }
                     if textLayout.lines.count > 1, let line = textLayout.lines.last, line.frame.width > realContentSize.width - (rightSize.width + insetBetweenContentAndDate) {
                         return rightSize.height
@@ -555,7 +582,7 @@ class ChatMessageItem: ChatRowItem {
                         return rightSize.height
                     }
                     if actionButtonText != nil {
-                        return rightSize.height
+                        return rightSize.height + 4
                     }
                     if webpageLayout.groupLayout != nil {
                         return rightSize.height
@@ -575,7 +602,7 @@ class ChatMessageItem: ChatRowItem {
             if contentOffset.x + textLayout.layoutSize.width - (rightSize.width + insetBetweenContentAndDate) > width {
                 return rightSize.height
             }
-        } else if let line = textLayout.lines.last, line.frame.width > realContentSize.width - (rightSize.width + insetBetweenContentAndDate) {
+        } else if let line = textLayout.lines.last, max(realContentSize.width, maxTitleWidth) < line.frame.width + (rightSize.width + insetBetweenContentAndDate) {
             return rightSize.height
         }
         return nil
@@ -719,8 +746,10 @@ class ChatMessageItem: ChatRowItem {
             if let index = index {
                 let index = min(index, items.count)
                 items.insert(ContextMenuItem(L10n.textCopyText, handler: { [weak self] in
-                    if let string = self?.textLayout.attributedString.string {
-                        copyToClipboard(string)
+                    if let string = self?.textLayout.attributedString {
+                        if !globalLinkExecutor.copyAttributedString(string) {
+                            copyToClipboard(string.string)
+                        }
                     }
                 }), at: index)
             }
@@ -770,7 +799,7 @@ class ChatMessageItem: ChatRowItem {
         return ChatMessageView.self
     }
     
-    static func applyMessageEntities(with attributes:[MessageAttribute], for text:String, context: AccountContext, fontSize: CGFloat, openInfo:@escaping (PeerId, Bool, MessageId?, ChatInitialAction?)->Void, botCommand:@escaping (String)->Void, hashtag:@escaping (String)->Void, applyProxy:@escaping (ProxyServerSettings)->Void, textColor: NSColor = theme.colors.text, linkColor: NSColor = theme.colors.link, monospacedPre:NSColor = theme.colors.monospacedPre, monospacedCode: NSColor = theme.colors.monospacedCode, mediaDuration: Double? = nil, timecode: @escaping(Double?)->Void) -> NSAttributedString {
+    static func applyMessageEntities(with attributes:[MessageAttribute], for text:String, context: AccountContext, fontSize: CGFloat, openInfo:@escaping (PeerId, Bool, MessageId?, ChatInitialAction?)->Void, botCommand:@escaping (String)->Void, hashtag:@escaping (String)->Void, applyProxy:@escaping (ProxyServerSettings)->Void, textColor: NSColor = theme.colors.text, linkColor: NSColor = theme.colors.link, monospacedPre:NSColor = theme.colors.monospacedPre, monospacedCode: NSColor = theme.colors.monospacedCode, mediaDuration: Double? = nil, timecode: @escaping(Double?)->Void = { _ in }, openBank: @escaping(String)->Void = { _ in }) -> NSAttributedString {
         var entities: [MessageTextEntity] = []
         for attribute in attributes {
             if let attribute = attribute as? TextEntitiesMessageAttribute {
@@ -867,10 +896,47 @@ class ChatMessageItem: ChatRowItem {
                     nsString = text as NSString
                 }
                 string.addAttribute(NSAttributedString.Key.link, value: inAppLink.hashtag(nsString!.substring(with: range), hashtag), range: range)
+                if let color = NSColor(hexString: nsString!.substring(with: range)) {
+                    
+                    struct RunStruct {
+                        let ascent: CGFloat
+                        let descent: CGFloat
+                        let width: CGFloat
+                    }
+                    
+                    let dimensions = NSMakeSize(theme.fontSize + 6, theme.fontSize + 6)
+                    let extentBuffer = UnsafeMutablePointer<RunStruct>.allocate(capacity: 1)
+                    extentBuffer.initialize(to: RunStruct(ascent: 0.0, descent: 0.0, width: dimensions.width))
+                    var callbacks = CTRunDelegateCallbacks(version: kCTRunDelegateVersion1, dealloc: { (pointer) in
+                    }, getAscent: { (pointer) -> CGFloat in
+                        let d = pointer.assumingMemoryBound(to: RunStruct.self)
+                        return d.pointee.ascent
+                    }, getDescent: { (pointer) -> CGFloat in
+                        let d = pointer.assumingMemoryBound(to: RunStruct.self)
+                        return d.pointee.descent
+                    }, getWidth: { (pointer) -> CGFloat in
+                        let d = pointer.assumingMemoryBound(to: RunStruct.self)
+                        return d.pointee.width
+                    })
+                    let delegate = CTRunDelegateCreate(&callbacks, extentBuffer)
+                    let key = kCTRunDelegateAttributeName as String
+                    let attrDictionaryDelegate:[NSAttributedString.Key : Any] = [NSAttributedString.Key(key): delegate as Any, .hexColorMark : color, .hexColorMarkDimensions: dimensions]
+                    
+                    string.addAttributes(attrDictionaryDelegate, range: NSMakeRange(range.upperBound - 1, 1))
+                }
+                
             case .Strikethrough:
                 string.addAttribute(NSAttributedString.Key.strikethroughStyle, value: true, range: range)
             case .Underline:
                 string.addAttribute(NSAttributedString.Key.underlineStyle, value: true, range: range)
+            case .BankCard:
+                if nsString == nil {
+                    nsString = text as NSString
+                }
+                 string.addAttribute(NSAttributedString.Key.foregroundColor, value: linkColor, range: range)
+                string.addAttribute(NSAttributedString.Key.link, value: inAppLink.callback(nsString!.substring(with: range), { bankCard in
+                    openBank(bankCard)
+                }), range: range)
             case let .Custom(type):
                 if type == ApplicationSpecificEntityType.Timecode {
                     string.addAttribute(NSAttributedString.Key.foregroundColor, value: linkColor, range: range)

@@ -8,10 +8,11 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
-import MtProtoKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
+
 
 private class ShadowView : View {
     
@@ -54,7 +55,6 @@ private class PhoneCallWindowView : View {
         
         controls.material = .dark
         controls.blendingMode = .behindWindow
-        
         secureContainerView.wantsLayer = true
         secureContainerView.background = NSColor(0x000000, 0.75)
         secureTextView.backgroundColor = .clear
@@ -100,7 +100,7 @@ private class PhoneCallWindowView : View {
         textNameView.font = .medium(18.0)
         textNameView.drawsBackground = false
         textNameView.backgroundColor = .clear
-        textNameView.textColor = nightBluePalette.text
+        textNameView.textColor = nightAccentPalette.text
         textNameView.isSelectable = false
         textNameView.isEditable = false
         textNameView.isBordered = false
@@ -112,7 +112,7 @@ private class PhoneCallWindowView : View {
         statusTextView.font = .normal(.header)
         statusTextView.drawsBackground = false
         statusTextView.backgroundColor = .clear
-        statusTextView.textColor = nightBluePalette.text
+        statusTextView.textColor = nightAccentPalette.text
         statusTextView.isSelectable = false
         statusTextView.isEditable = false
         statusTextView.isBordered = false
@@ -131,7 +131,7 @@ private class PhoneCallWindowView : View {
         declineControl.setFrameOrigin(80, 30)
         acceptControl.setFrameOrigin(frame.width - acceptControl.frame.width - 80, 30)
         
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = 10
         
         closeMissedControl.isHidden = true
         closeMissedControl.layer?.opacity = 0
@@ -152,7 +152,7 @@ private class PhoneCallWindowView : View {
         secureTextView.center()
         secureTextView.setFrameOrigin(secureTextView.frame.minX + 2, secureTextView.frame.minY)
         secureContainerView.centerX(y: frame.height - 170 - secureContainerView.frame.height)
-        muteControl.setFrameOrigin(frame.width - 60 - muteControl.frame.width, 30 + floorToScreenPixels(scaleFactor: backingScaleFactor, (declineControl.frame.height - muteControl.frame.height)/2))
+        muteControl.setFrameOrigin(frame.width - 60 - muteControl.frame.width, 30 + floorToScreenPixels(backingScaleFactor, (declineControl.frame.height - muteControl.frame.height)/2))
         
         closeMissedControl.setFrameOrigin(80, 30)
         
@@ -221,7 +221,7 @@ private class PhoneCallWindowView : View {
                     self?.declineControl.isHidden = true
                 }
             })
-            acceptControl.change(pos: NSMakePoint(floorToScreenPixels(scaleFactor: backingScaleFactor, (frame.width - acceptControl.frame.width) / 2), 30), animated: animated)
+            acceptControl.change(pos: NSMakePoint(floorToScreenPixels(backingScaleFactor, (frame.width - acceptControl.frame.width) / 2), 30), animated: animated)
             acceptControl.set(image: theme.icons.callWindowDecline, for: .Normal)
             
             muteControl.isHidden = false
@@ -346,13 +346,14 @@ class PhoneCallWindowController {
     private let recallDisposable = MetaDisposable()
     private let peerDisposable = MetaDisposable()
     private let keyStateDisposable = MetaDisposable()
+    private let fetching = MetaDisposable()
     init(_ session:PCallSession) {
         self.session = session
     
         
         let size = NSMakeSize(300, 460)
         if let screen = NSScreen.main {
-            self.window = Window(contentRect: NSMakeRect(floorToScreenPixels(scaleFactor: System.backingScale, (screen.frame.width - size.width) / 2), floorToScreenPixels(scaleFactor: System.backingScale, (screen.frame.height - size.height) / 2), size.width, size.height), styleMask: [.fullSizeContentView], backing: .buffered, defer: true, screen: screen)
+            self.window = Window(contentRect: NSMakeRect(floorToScreenPixels(System.backingScale, (screen.frame.width - size.width) / 2), floorToScreenPixels(System.backingScale, (screen.frame.height - size.height) / 2), size.width, size.height), styleMask: [.fullSizeContentView], backing: .buffered, defer: true, screen: screen)
             self.window.level = .modalPanel
             self.window.backgroundColor = .clear
         } else {
@@ -513,6 +514,7 @@ class PhoneCallWindowController {
         recallDisposable.dispose()
         peerDisposable.dispose()
         keyStateDisposable.dispose()
+        fetching.dispose()
         updateLocalizationAndThemeDisposable.dispose()
         NotificationCenter.default.removeObserver(self)
     }
@@ -536,27 +538,26 @@ class PhoneCallWindowController {
     
     private func updatePeerUI(_ user:TelegramUser) {
         
-        let media = TelegramMediaImage(imageId: MediaId(namespace: 0, id: user.id.toInt64()), representations: user.profileImageRepresentations, immediateThumbnailData: nil, reference: nil, partialReference: nil)
+        let media = TelegramMediaImage(imageId: MediaId(namespace: 0, id: user.id.toInt64()), representations: user.profileImageRepresentations, immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
         
 
-        if let dimension = user.profileImageRepresentations.last?.dimensions {
+        if let dimension = user.profileImageRepresentations.last?.dimensions.size {
             let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: dimension, boundingSize: view.imageView.frame.size, intrinsicInsets: NSEdgeInsets())
             view.imageView.setSignal(signal: cachedMedia(media: media, arguments: arguments, scale: view.backingScaleFactor), clearInstantly: true)
-            view.imageView.setSignal(chatMessagePhoto(account: session.account, imageReference: ImageMediaReference.standalone(media: media), scale: view.backingScaleFactor), clearInstantly: false, animate: true, cacheImage: { result in
+            view.imageView.setSignal(chatMessagePhoto(account: session.account, imageReference: ImageMediaReference.standalone(media: media), peer: user, scale: view.backingScaleFactor), clearInstantly: false, animate: true, cacheImage: { result in
                  cacheMedia(result, media: media, arguments: arguments, scale: System.backingScale)
             })
             view.imageView.set(arguments: arguments)
 
+            if let reference = PeerReference(user) {
+                fetching.set(fetchedMediaResource(mediaBox: session.account.postbox.mediaBox, reference: .avatar(peer: reference, resource: media.representations.last!.resource)).start())
+            }
+            
         } else {
             view.imageView.setSignal(signal: generateEmptyRoundAvatar(view.imageView.frame.size, font: .avatar(90.0), account: session.account, peer: user) |> map { TransformImageResult($0, true) })
         }
         
-        
        
-        
-        _ = chatMessagePhotoInteractiveFetched(account: session.account, imageReference: ImageMediaReference.standalone(media: media)).start()
-        
-        
         view.updateName(user.displayTitle)
         
     }

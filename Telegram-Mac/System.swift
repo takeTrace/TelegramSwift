@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import TelegramCoreMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 import TGUIKit
-import PostboxMac
+import Postbox
 private let _dQueue = Queue.init(name: "chatListQueue")
 private let _sQueue = Queue.init(name: "ChatQueue")
 
@@ -36,7 +37,13 @@ var mainWindow:Window {
     fatalError("window not found")
 }
 
-
+var systemAppearance: NSAppearance {
+    if #available(OSX 10.14, *) {
+        return NSApp.effectiveAppearance
+    } else {
+        return NSAppearance.current
+    }
+}
 
 
 public func deliverOnPrepareQueue<T, E>(_ signal: Signal<T, E>) -> Signal<T, E> {
@@ -145,6 +152,7 @@ func fs(_ path:String) -> Int32? {
     }
     return nil
 }
+
 
 
 

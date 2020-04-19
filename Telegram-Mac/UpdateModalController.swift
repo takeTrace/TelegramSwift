@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 private class UpdateTableItem : GeneralRowItem {
     fileprivate let titleLayout: TextViewLayout
@@ -58,7 +59,7 @@ private final class UpdateTableView : TableRowView {
     override func layout() {
         super.layout()
         logoView.setFrameOrigin(25, 10)
-        titleView.setFrameOrigin(logoView.frame.maxX + 10, floorToScreenPixels(scaleFactor: backingScaleFactor, logoView.frame.minY + (logoView.frame.height - titleView.frame.height)/2))
+        titleView.setFrameOrigin(logoView.frame.maxX + 10, floorToScreenPixels(backingScaleFactor, logoView.frame.minY + (logoView.frame.height - titleView.frame.height)/2))
         descView.setFrameOrigin(logoView.frame.minX, logoView.frame.maxY + 20)
     }
     
@@ -113,7 +114,7 @@ class UpdateModalController: ModalViewController {
     override var modalInteractions: ModalInteractions? {
         return ModalInteractions(acceptTitle: "Update Telegram", accept: {
             #if APP_STORE
-            execute(inapp: inAppLink.external(link: "https://itunes.apple.com/us/app/telegram/id747648890", false))
+            execute(inapp: inAppLink.external(link: "https://apps.apple.com/us/app/telegram/id747648890", false))
             #else
             (NSApp.delegate as? AppDelegate)?.checkForUpdates("")
             #endif

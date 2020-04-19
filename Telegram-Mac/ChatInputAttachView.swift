@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 class ChatInputAttachView: ImageButton, Notifable {
@@ -84,10 +85,17 @@ class ChatInputAttachView: ImageButton, Notifable {
                     if let peer = chatInteraction.presentation.peer, peer.isGroup || peer.isSupergroup {
                         canAttachPoll = true
                     }
+                    if let peer = chatInteraction.presentation.mainPeer, peer.isBot {
+                        canAttachPoll = true
+                    }
+                    
                     if let peer = chatInteraction.presentation.peer as? TelegramChannel {
                         if peer.hasPermission(.sendMessages) {
                             canAttachPoll = true
                         }
+                    }
+                    if canAttachPoll && permissionText(from: peer, for: .banSendPolls) != nil {
+                        canAttachPoll = false
                     }
                    
                     if canAttachPoll {
@@ -125,14 +133,23 @@ class ChatInputAttachView: ImageButton, Notifable {
         
         set(handler: { [weak self] control in
             guard let `self` = self else {return}
-            if let peer = self.chatInteraction.presentation.peer, self.chatInteraction.presentation.interfaceState.editState == nil {
+            
+            if let editState = chatInteraction.presentation.interfaceState.editState {
+                return
+            }
+            
+            if let peer = self.chatInteraction.presentation.peer {
                 if let permissionText = permissionText(from: peer, for: .banSendMedia) {
                     alert(for: mainWindow, info: permissionText)
                     return
                 }
                 self.controller?.popover?.hide()
                 Queue.mainQueue().justDispatch {
-                    self.chatInteraction.attachFile(true)
+                    if self.chatInteraction.presentation.interfaceState.editState != nil {
+                        self.chatInteraction.updateEditingMessageMedia(nil, true)
+                    } else {
+                        self.chatInteraction.attachFile(true)
+                    }
                 }
             }
         }, for: .Click)

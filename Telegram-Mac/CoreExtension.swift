@@ -8,27 +8,14 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
-import MtProtoKitMac
+import SyncCore
+import MtProtoKit
 
-extension AdminLogEventsFlags {
-    
-    /*
-     "ChannelEventFilter.NewRestrictions" = "New Restrictions";
-     "ChannelEventFilter.NewAdmins" = "New Admins";
-     "ChannelEventFilter.NewMembers" = "New Members";
-     "ChannelEventFilter.GroupInfo" = "Group Info";
-     "ChannelEventFilter.DeletedMessages" = "Deleted Messages";
-     "ChannelEventFilter.EditedMessages" = "Edited Messages";
-     "ChannelEventFilter.PinnedMessages" = "Pinned Messages";
-     "ChannelEventFilter.LeavingMembers" = "Leaving Members";
- */
-    
-    
-}
 
 extension RenderedChannelParticipant {
     func withUpdatedBannedRights(_ info: ChannelParticipantBannedInfo) -> RenderedChannelParticipant {
@@ -241,7 +228,7 @@ extension TelegramMediaFile {
     var videoSize:NSSize {
         for attr in attributes {
             if case let .Video(_,size, _) = attr {
-                return size
+                return size.size
             }
         }
         return NSZeroSize
@@ -261,7 +248,7 @@ extension TelegramMediaFile {
     var imageSize:NSSize {
         for attr in attributes {
             if case let .ImageSize(size) = attr {
-                return size
+                return size.size
             }
         }
         return NSZeroSize
@@ -318,9 +305,11 @@ extension Media {
         if self is TelegramMediaImage {
             return true
         } else if let file = self as? TelegramMediaFile {
-            return file.isVideo || (file.isAnimated && !file.mimeType.lowercased().hasSuffix("gif")) || file.isAnimatedSticker
+            return file.isVideo || (file.isAnimated && !file.mimeType.lowercased().hasSuffix("gif"))
         } else if let map = self as? TelegramMediaMap {
             return map.venue == nil
+        } else if self is TelegramMediaDice {
+            return false
         }
         return false
     }
@@ -390,6 +379,15 @@ public extension TelegramMediaFile {
         for attr in attributes {
             if case let .Sticker(_, reference, _) = attr {
                 return reference
+            }
+        }
+        return nil
+    }
+    
+    var maskData: StickerMaskCoords? {
+        for attr in attributes {
+            if case let .Sticker(_, _, mask) = attr {
+                return mask
             }
         }
         return nil
@@ -483,6 +481,15 @@ public extension Message {
         return isCrosspostFromChannel
     }
     
+    var channelViewsCount: Int32? {
+        for attribute in self.attributes {
+            if let attribute = attribute as? ViewCountMessageAttribute {
+                return Int32(attribute.count)
+            }
+        }
+        return nil
+    }
+    
     var isScheduledMessage: Bool {
         return self.id.namespace == Namespaces.Message.ScheduledCloud || self.id.namespace == Namespaces.Message.ScheduledLocal
     }
@@ -494,6 +501,13 @@ public extension Message {
             }
         }
         return self.flags.contains(.WasScheduled)
+    }
+    
+    var isPublicPoll: Bool {
+        if let media = self.media.first as? TelegramMediaPoll {
+            return media.publicity == .public
+        }
+        return false
     }
     
     var isHasInlineKeyboard: Bool {
@@ -591,7 +605,7 @@ public extension Message {
         return Message(stableId: stableId, stableVersion: stableVersion, id: id, globallyUniqueId: globallyUniqueId, groupingKey: groupingKey, groupInfo: groupInfo, timestamp: timestamp, flags: flags, tags: tags, globalTags: globalTags, localTags: localTags, forwardInfo: forwardInfo, author: author, text: text, attributes: attributes, media: media, peers: peers, associatedMessages: associatedMessages, associatedMessageIds: associatedMessageIds)
     }
     
-    public func withUpdatedTimestamp(_ timestamp: Int32) -> Message {
+    func withUpdatedTimestamp(_ timestamp: Int32) -> Message {
         return Message(stableId: self.stableId, stableVersion: self.stableVersion, id: self.id, globallyUniqueId: self.globallyUniqueId, groupingKey: self.groupingKey, groupInfo: self.groupInfo, timestamp: timestamp, flags: self.flags, tags: self.tags, globalTags: self.globalTags, localTags: self.localTags, forwardInfo: self.forwardInfo, author: self.author, text: self.text, attributes: self.attributes, media: self.media, peers: self.peers, associatedMessages: self.associatedMessages, associatedMessageIds: self.associatedMessageIds)
     }
     
@@ -747,6 +761,23 @@ func canForwardMessage(_ message:Message, account:Account) -> Bool {
     return true
 }
 
+public struct ChatAvailableMessageActionOptions: OptionSet {
+    public var rawValue: Int32
+    
+    public init(rawValue: Int32) {
+        self.rawValue = rawValue
+    }
+    
+    public init() {
+        self.rawValue = 0
+    }
+    
+    public static let deleteLocally = ChatAvailableMessageActionOptions(rawValue: 1 << 0)
+    public static let deleteGlobally = ChatAvailableMessageActionOptions(rawValue: 1 << 1)
+    public static let unsendPersonal = ChatAvailableMessageActionOptions(rawValue: 1 << 7)
+}
+
+
 
 func canDeleteForEveryoneMessage(_ message:Message, context: AccountContext) -> Bool {
     if message.peers[message.id.peerId] is TelegramChannel || message.peers[message.id.peerId] is TelegramSecretChat {
@@ -755,19 +786,31 @@ func canDeleteForEveryoneMessage(_ message:Message, context: AccountContext) -> 
         if context.limitConfiguration.canRemoveIncomingMessagesInPrivateChats && message.peers[message.id.peerId] is TelegramUser {
             return true
         }
-        if Int(context.limitConfiguration.maxMessageEditingInterval) + Int(message.timestamp) > Int(Date().timeIntervalSince1970) {
-            if context.account.peerId != messageMainPeer(message)?.id {
-                return !(message.media.first is TelegramMediaAction)
-            }
-        } else if let peer = message.peers[message.id.peerId] as? TelegramGroup {
+        if let peer = message.peers[message.id.peerId] as? TelegramGroup {
             switch peer.role {
             case .creator, .admin:
                 return true
             default:
+                if Int(context.limitConfiguration.maxMessageEditingInterval) + Int(message.timestamp) > Int(Date().timeIntervalSince1970) {
+                    if context.account.peerId == message.effectiveAuthor?.id {
+                        return !(message.media.first is TelegramMediaAction)
+                    }
+                }
                 return false
             }
             
+        } else if Int(context.limitConfiguration.maxMessageEditingInterval) + Int(message.timestamp) > Int(Date().timeIntervalSince1970) {
+            if context.account.peerId == message.author?.id {
+                return !(message.media.first is TelegramMediaAction)
+            }
         }
+    }
+    return false
+}
+
+func mustDeleteForEveryoneMessage(_ message:Message) -> Bool {
+    if message.peers[message.id.peerId] is TelegramChannel || message.peers[message.id.peerId] is TelegramSecretChat {
+        return true
     }
     return false
 }
@@ -777,7 +820,7 @@ func canReplyMessage(_ message: Message, peerId: PeerId) -> Bool {
         if message.isScheduledMessage {
             return false
         }
-        if peer.canSendMessage, peerId == message.id.peerId, !message.flags.contains(.Unsent) && !message.flags.contains(.Failed) && message.id.namespace != Namespaces.Message.Local {
+        if peer.canSendMessage, peerId == message.id.peerId, !message.flags.contains(.Unsent) && !message.flags.contains(.Failed) && (message.id.namespace != Namespaces.Message.Local || message.id.peerId.namespace == Namespaces.Peer.SecretChat) {
             return true
         }
     }
@@ -819,6 +862,9 @@ func canEditMessage(_ message:Message, context: AccountContext) -> Bool {
             return false
         }
         if media is TelegramMediaPoll {
+            return false
+        }
+        if media is TelegramMediaDice {
             return false
         }
     }
@@ -871,7 +917,7 @@ func canPinMessage(_ message:Message, for peer:Peer, account:Account) -> Bool {
 }
 
 func canReportMessage(_ message: Message, _ account: Account) -> Bool {
-    if message.isScheduledMessage {
+    if message.isScheduledMessage || message.flags.contains(.Failed) || message.flags.contains(.Sending) {
         return false
     }
     if let peer = messageMainPeer(message), message.author?.id != account.peerId {
@@ -982,16 +1028,16 @@ extension Peer {
         return self is TelegramGroup
     }
     
-    var isRestrictedChannel: Bool {
+    func isRestrictedChannel(_ contentSettings: ContentSettings) -> Bool {
         if let peer = self as? TelegramChannel {
             if let restrictionInfo = peer.restrictionInfo {
-                #if APP_STORE
                 for rule in restrictionInfo.rules {
+                    #if APP_STORE
                     if rule.platform == "ios" || rule.platform == "all" {
-                        return true
+                        return !contentSettings.ignoreContentRestrictionReasons.contains(rule.reason)
                     }
+                    #endif
                 }
-                #endif
             }
         }
         return false
@@ -1002,7 +1048,7 @@ extension Peer {
             if let restrictionInfo = peer.restrictionInfo {
                 for rule in restrictionInfo.rules {
                     if rule.platform == "ios" || rule.platform == "all" {
-                        return rule.reason
+                        return rule.text
                     }
                 }
             }
@@ -2097,7 +2143,7 @@ func removeChatInteractively(context: AccountContext, peerId:PeerId, userId: Pee
         
         return modernConfirmSignal(for: mainWindow, account: context.account, peerId: userId ?? peerId, information: text, okTitle: okTitle ?? L10n.alertOK, thridTitle: thridTitle, thridAutoOn: false) |> mapToSignal { result -> Signal<Bool, NoError> in
             
-            context.chatUndoManager.add(action: ChatUndoAction(peerId: peerId, type: type, action: { status in
+            context.sharedContext.bindings.mainController().chatList.addUndoAction(ChatUndoAction(peerId: peerId, type: type, action: { status in
                 switch status {
                 case .success:
                     context.chatUndoManager.removePeerChat(account: context.account, peerId: peerId, type: type, reportChatSpam: false, deleteGloballyIfPossible: deleteGroup || result == .thrid)
@@ -2108,7 +2154,7 @@ func removeChatInteractively(context: AccountContext, peerId:PeerId, userId: Pee
                     break
                 }
             }))
-            
+                        
             return .single(true)
         }
     }
@@ -2172,16 +2218,7 @@ extension SecureIdDate {
     }
 }
 
-extension PostboxAccessChallengeData {
-    var timeout:Int32? {
-        switch self {
-        case .none:
-            return nil
-        case let .numericalPassword(_, timeout, _), let .plaintextPassword(_, timeout, _):
-            return timeout
-        }
-    }
-}
+
 
 func clearCache(_ path: String, excludes: [(partial: String, complete: String)]) -> Signal<Void, NoError> {
     return Signal { subscriber -> Disposable in
@@ -2217,17 +2254,20 @@ func clearCache(_ path: String, excludes: [(partial: String, complete: String)])
     } |> runOn(resourcesQueue)
 }
 
-func moveWallpaperToCache(postbox: Postbox, resource: TelegramMediaResource, blurred: Bool) -> Signal<String, NoError> {
+func moveWallpaperToCache(postbox: Postbox, resource: TelegramMediaResource, reference: WallpaperReference?, settings: WallpaperSettings, isPattern: Bool) -> Signal<String, NoError> {
     let resourceData: Signal<MediaResourceData, NoError>
-    if blurred {
+    if isPattern {
+        resourceData = postbox.mediaBox.cachedResourceRepresentation(resource, representation: CachedPatternWallpaperMaskRepresentation(size: nil, settings: settings), complete: true)
+    } else if settings.blur {
         resourceData = postbox.mediaBox.cachedResourceRepresentation(resource, representation: CachedBlurredWallpaperRepresentation(), complete: true)
     } else {
         resourceData = postbox.mediaBox.resourceData(resource)
     }
+    
    
-    return combineLatest(fetchedMediaResource(mediaBox: postbox.mediaBox, reference: MediaResourceReference.wallpaper(resource: resource), reportResultStatus: true) |> `catch` { _ in return .complete() }, resourceData) |> mapToSignal { _, data in
+    return combineLatest(fetchedMediaResource(mediaBox: postbox.mediaBox, reference: MediaResourceReference.wallpaper(wallpaper: reference, resource: resource), reportResultStatus: true) |> `catch` { _ in return .complete() }, resourceData) |> mapToSignal { _, data in
         if data.complete {
-            return moveWallpaperToCache(postbox: postbox, path: data.path, blurred: blurred)
+            return moveWallpaperToCache(postbox: postbox, path: data.path, resource: resource, settings: settings)
         } else {
             return .complete()
         }
@@ -2237,26 +2277,28 @@ func moveWallpaperToCache(postbox: Postbox, resource: TelegramMediaResource, blu
 func moveWallpaperToCache(postbox: Postbox, wallpaper: Wallpaper) -> Signal<Wallpaper, NoError> {
     switch wallpaper {
     case let .image(reps, settings):
-        return moveWallpaperToCache(postbox: postbox, resource: largestImageRepresentation(reps)!.resource, blurred: settings.blur) |> map { _ in return wallpaper}
+        return moveWallpaperToCache(postbox: postbox, resource: largestImageRepresentation(reps)!.resource, reference: nil, settings: settings, isPattern: false) |> map { _ in return wallpaper}
     case let .custom(representation, blurred):
-        return moveWallpaperToCache(postbox: postbox, resource: representation.resource, blurred: blurred) |> map { _ in return wallpaper}
-    case let .file(_, file, settings, isPattern):
-        return moveWallpaperToCache(postbox: postbox, resource: file.resource, blurred: settings.blur) |> map { _ in return wallpaper}
+        return moveWallpaperToCache(postbox: postbox, resource: representation.resource, reference: nil, settings: WallpaperSettings(blur: blurred), isPattern: false) |> map { _ in return wallpaper}
+    case let .file(slug, file, settings, isPattern):
+        return moveWallpaperToCache(postbox: postbox, resource: file.resource, reference: .slug(slug), settings: settings, isPattern: isPattern) |> map { _ in return wallpaper}
     default:
        return .single(wallpaper)
     }
 }
 
-func moveWallpaperToCache(postbox: Postbox, path: String, blurred: Bool, randomName: Bool = false) -> Signal<String, NoError> {
+func moveWallpaperToCache(postbox: Postbox, path: String, resource: TelegramMediaResource, settings: WallpaperSettings) -> Signal<String, NoError> {
     return Signal { subscriber in
         
-        let wallpapers = "~/Library/Group Containers/6N38VWS5BX.ru.keepcoder.Telegram/Wallpapers/".nsstring.expandingTildeInPath
+        let wallpapers = "~/Library/Group Containers/\(ApiEnvironment.group)/Wallpapers/".nsstring.expandingTildeInPath
         try? FileManager.default.createDirectory(at: URL(fileURLWithPath: wallpapers), withIntermediateDirectories: true, attributes: nil)
         
-        let out = wallpapers + "/" + (randomName ? "\(arc4random64())" : path.nsstring.lastPathComponent) + ".jpg"
+        let out = wallpapers + "/" + resource.id.uniqueId + "\(settings.stringValue)" + ".jpg"
         
-        try? FileManager.default.removeItem(atPath: out)
-        try? FileManager.default.copyItem(atPath: path, toPath: out)
+        if !FileManager.default.fileExists(atPath: out) {
+            try? FileManager.default.removeItem(atPath: out)
+            try? FileManager.default.copyItem(atPath: path, toPath: out)
+        }
         subscriber.putNext(out)
         
         subscriber.putCompletion()
@@ -2265,8 +2307,28 @@ func moveWallpaperToCache(postbox: Postbox, path: String, blurred: Bool, randomN
     }
 }
 
-func wallpaperPath(_ resource: TelegramMediaResource, blurred: Bool) -> String {
-    return "~/Library/Group Containers/6N38VWS5BX.ru.keepcoder.Telegram/Wallpapers/".nsstring.expandingTildeInPath + "/" + resource.id.uniqueId + "\(blurred ? ":\(CachedBlurredWallpaperRepresentation.uniqueId)" : "")" + ".jpg"
+extension WallpaperSettings {
+    var stringValue: String {
+        var value: String = ""
+        if let top = self.color {
+            value += "ctop\(top)"
+        }
+        if let top = self.bottomColor {
+            value += "cbottom\(top)"
+        }
+        if let rotation = self.rotation {
+            value += "rotation\(rotation)"
+        }
+        if self.blur {
+            value += "blur"
+        }
+        return value
+    }
+}
+
+func wallpaperPath(_ resource: TelegramMediaResource, settings: WallpaperSettings) -> String {
+   
+    return "~/Library/Group Containers/\(ApiEnvironment.group)/Wallpapers/".nsstring.expandingTildeInPath + "/" + resource.id.uniqueId + "\(settings.stringValue)" + ".jpg"
 }
 
 
@@ -2489,18 +2551,34 @@ struct SecureIdDocumentValue {
         self.context = context
     }
     var image: TelegramMediaImage {
-        return TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [TelegramMediaImageRepresentation(dimensions: NSMakeSize(100, 100), resource: document.resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+        return TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [TelegramMediaImageRepresentation(dimensions: PixelDimensions(100, 100), resource: document.resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
     }
 }
 
-func openFaq(context: AccountContext) {
+enum FaqDestination {
+    case telegram
+    case ton
+    case walletTOS
+    var url:String {
+        switch self {
+        case .telegram:
+            return "https://telegram.org/faq/"
+        case .ton:
+            return "https://telegram.org/faq/gram_wallet/"
+        case .walletTOS:
+            return "https://telegram.org/tos/wallet/"
+        }
+    }
+}
+
+func openFaq(context: AccountContext, dest: FaqDestination = .telegram) {
     let language = appCurrentLanguage.languageCode[appCurrentLanguage.languageCode.index(appCurrentLanguage.languageCode.endIndex, offsetBy: -2) ..< appCurrentLanguage.languageCode.endIndex]
     
-    _ = showModalProgress(signal: webpagePreview(account: context.account, url: "https://telegram.org/faq/" + language) |> deliverOnMainQueue, for: context.window).start(next: { webpage in
+    _ = showModalProgress(signal: webpagePreview(account: context.account, url: dest.url + language) |> deliverOnMainQueue, for: context.window).start(next: { webpage in
         if let webpage = webpage {
             showInstantPage(InstantPageViewController(context, webPage: webpage, message: nil))
         } else {
-            execute(inapp: .external(link: "https://telegram.org/faq/" + language, true))
+            execute(inapp: .external(link: dest.url + language, true))
         }
     })
 }
@@ -2557,8 +2635,45 @@ func requestAudioPermission() -> Signal<Bool, NoError> {
     }
 }
 
+
+func requestMediaPermission(_ type: AVFoundation.AVMediaType) -> Signal<Bool, NoError> {
+    if #available(OSX 10.14, *) {
+        return Signal { subscriber in
+            let status = AVCaptureDevice.authorizationStatus(for: type)
+            var cancelled: Bool = false
+            switch status {
+            case .notDetermined:
+                AVCaptureDevice.requestAccess(for: type, completionHandler: { completed in
+                    if !cancelled {
+                        subscriber.putNext(completed)
+                        subscriber.putCompletion()
+                    }
+                })
+            case .authorized:
+                subscriber.putNext(true)
+                subscriber.putCompletion()
+            case .denied:
+                subscriber.putNext(false)
+                subscriber.putCompletion()
+            case .restricted:
+                subscriber.putNext(false)
+                subscriber.putCompletion()
+            @unknown default:
+                subscriber.putNext(false)
+                subscriber.putCompletion()
+            }
+            return ActionDisposable {
+                cancelled = true
+            }
+        }
+    } else {
+        return .single(true)
+    }
+}
+
 enum SystemSettingsCategory : String {
     case microphone = "Privacy_Microphone"
+    case none = ""
 }
 
 func openSystemSettings(_ category: SystemSettingsCategory) {
@@ -2627,8 +2742,11 @@ func bigEmojiMessage(_ sharedContext: SharedAccountContext, message: Message) ->
 
 
 struct PeerEquatable: Equatable {
-    private let peer: Peer
+    let peer: Peer
     init(peer: Peer) {
+        self.peer = peer
+    }
+    init(_ peer: Peer) {
         self.peer = peer
     }
     static func ==(lhs: PeerEquatable, rhs: PeerEquatable) -> Bool {
@@ -2700,14 +2818,154 @@ extension TelegramMediaWebpageLoadedContent {
                 newUrl = self.url + "?t=\(timecode)"
             }
         }
-        return TelegramMediaWebpageLoadedContent(url: newUrl, displayUrl: self.displayUrl, hash: self.hash, type: self.type, websiteName: self.websiteName, title: self.title, text: self.text, embedUrl: self.embedUrl, embedType: self.embedType, embedSize: self.embedSize, duration: self.duration, author: self.author, image: self.image, file: self.file, files: self.files, instantPage: self.instantPage)
+        return TelegramMediaWebpageLoadedContent(url: newUrl, displayUrl: self.displayUrl, hash: self.hash, type: self.type, websiteName: self.websiteName, title: self.title, text: self.text, embedUrl: self.embedUrl, embedType: self.embedType, embedSize: self.embedSize, duration: self.duration, author: self.author, image: self.image, file: self.file, attributes: self.attributes, instantPage: self.instantPage)
     }
     func withUpdatedFile(_ file: TelegramMediaFile) -> TelegramMediaWebpageLoadedContent {
-        return TelegramMediaWebpageLoadedContent(url: self.url, displayUrl: self.displayUrl, hash: self.hash, type: self.type, websiteName: self.websiteName, title: self.title, text: self.text, embedUrl: self.embedUrl, embedType: self.embedType, embedSize: self.embedSize, duration: self.duration, author: self.author, image: self.image, file: file, files: self.files, instantPage: self.instantPage)
+        return TelegramMediaWebpageLoadedContent(url: self.url, displayUrl: self.displayUrl, hash: self.hash, type: self.type, websiteName: self.websiteName, title: self.title, text: self.text, embedUrl: self.embedUrl, embedType: self.embedType, embedSize: self.embedSize, duration: self.duration, author: self.author, image: self.image, file: file, attributes: self.attributes, instantPage: self.instantPage)
+    }
+    
+    var isCrossplatformTheme: Bool {
+        for attr in attributes {
+            switch attr {
+            case let .theme(theme):
+                var hasFile: Bool = false
+                for file in theme.files {
+                    if file.mimeType == "application/x-tgtheme-macos", !file.previewRepresentations.isEmpty {
+                        hasFile = true
+                    }
+                }
+                if let _ = theme.settings, !hasFile {
+                    return true
+                }
+            default:
+                break
+            }
+        }
+        return false
+    }
+    
+    var crossplatformPalette: ColorPalette? {
+        for attr in attributes {
+            switch attr {
+            case let .theme(theme):
+                return theme.settings?.palette
+            default:
+                break
+            }
+        }
+        return nil
+    }
+    var crossplatformWallpaper: Wallpaper? {
+        for attr in attributes {
+            switch attr {
+            case let .theme(theme):
+                return theme.settings?.background?.uiWallpaper
+            default:
+                break
+            }
+        }
+        return nil
+    }
+    
+    var themeSettings: TelegramThemeSettings? {
+        for attr in attributes {
+            switch attr {
+            case let .theme(theme):
+                return theme.settings
+            default:
+                break
+            }
+        }
+        return nil
     }
 }
 
+extension TelegramBaseTheme {
+    var palette: ColorPalette {
+        switch self {
+        case .classic:
+            return dayClassicPalette
+        case .day:
+            return whitePalette
+        case .night:
+            return darkPalette
+        case .tinted:
+            return nightAccentPalette
+        }
+    }
+}
+extension TelegramThemeSettings {
+    var palette: ColorPalette {
+        return baseTheme.palette.withAccentColor(accent)
+    }
+    
+    var accent: PaletteAccentColor {
+        var messages: (top: NSColor, bottom: NSColor)?
+        if let message = self.messageColors {
+            let top = NSColor(argb: UInt32(bitPattern: message.top))
+            let bottom = NSColor(argb: UInt32(bitPattern: message.bottom))
+            messages = (top: top, bottom: bottom)
+        } else {
+            messages = nil
+        }
+        return PaletteAccentColor(NSColor(rgb: UInt32(bitPattern: self.accentColor)), messages)
+    }
+    
+    var background: TelegramWallpaper? {
+        if let wallpaper = self.wallpaper {
+            return wallpaper
+        } else {
+            if self.baseTheme == .classic {
+                return .builtin(WallpaperSettings())
+            }
+        }
+        return nil
+    }
+    
+    var desc: String {
+        let wString: String
+        if let wallpaper = self.wallpaper {
+            wString = "\(wallpaper)"
+        } else {
+            wString = ""
+        }
+        return "\(self.accentColor)-\(self.baseTheme)-\(String(describing: self.messageColors?.top))-\(String(describing: self.messageColors?.bottom))-\(wString)"
+    }
+}
+
+extension TelegramWallpaper {
+    var uiWallpaper: Wallpaper {
+        let t: Wallpaper
+        switch self {
+        case .builtin:
+            t = .builtin
+        case let .color(color):
+            t = .color(color)
+        case let .file(values):
+            t = .file(slug: values.slug, file: values.file, settings: values.settings, isPattern: values.isPattern)
+        case let .gradient(top, bottom, settings):
+            t = .gradient(top, bottom, settings.rotation)
+        case let .image(reps, settings):
+            t = .image(reps, settings: settings)
+        }
+        return t
+    }
+}
+
+extension Wallpaper {
+    var cloudWallpaper: TelegramWallpaper? {
+        switch self {
+        case .builtin:
+            return .builtin(WallpaperSettings())
+        case let .color(color):
+            return .color(color)
+        case let .gradient(top, bottom, rotation):
+            return .gradient(top, bottom, WallpaperSettings(rotation: rotation))
+        default:
+            break
+        }
+        return nil
+    }
+}
 
 //
-
-

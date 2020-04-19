@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 
 
@@ -262,6 +263,7 @@ class EmojiViewController: TelegramGenericViewController<EmojiControllerView>, T
     
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        genericView.needsLayout = true
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -347,7 +349,7 @@ class EmojiViewController: TelegramGenericViewController<EmojiControllerView>, T
             
             
             
-            let w = floorToScreenPixels(scaleFactor: System.backingScale, frame.width / CGFloat(seg.count))
+            let w = floorToScreenPixels(System.backingScale, frame.width / CGFloat(seg.count))
             
             genericView.tabs.setFrameSize(NSMakeSize(w * CGFloat(seg.count), 40))
             genericView.tabs.center()
@@ -406,6 +408,8 @@ class EmojiViewController: TelegramGenericViewController<EmojiControllerView>, T
         genericView.tabs.changeSelection(stableId: stableId)
         genericView.tableView.scroll(to: .top(id: stableId, innerId: nil, animated: true, focus: .init(focus: false), inset: 0), inset:NSEdgeInsets(top:3))
     }
-    
+    override func scrollup(force: Bool = false) {
+        self.genericView.tableView.scroll(to: .up(true))
+    }
 
 }

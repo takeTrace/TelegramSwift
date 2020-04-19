@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 import TGUIKit
-import PostboxMac
-import SwiftSignalKitMac
+import Postbox
+import SwiftSignalKit
 class ChatGIFContentView: ChatMediaContentView {
     
     private var player:GIFPlayerView = GIFPlayerView()
@@ -191,13 +192,13 @@ class ChatGIFContentView: ChatMediaContentView {
         
         if let media = media as? TelegramMediaFile {
             
-            let dimensions = media.dimensions ?? size
+            let dimensions = media.dimensions?.size ?? size
             var updatedStatusSignal: Signal<MediaResourceStatus, NoError>?
             
             let reference = parent != nil ? FileMediaReference.message(message: MessageReference(parent!), media: media) : FileMediaReference.standalone(media: media)
             let fitted = dimensions.aspectFilled(size)
-            player.setVideoLayerGravity(.resizeAspectFill)
-            let arguments = TransformImageArguments(corners: ImageCorners(topLeft: .Corner(topLeftRadius), topRight: .Corner(topRightRadius), bottomLeft: .Corner(bottomLeftRadius), bottomRight: .Corner(bottomRightRadius)), imageSize: fitted, boundingSize: size, intrinsicInsets: NSEdgeInsets())
+            player.setVideoLayerGravity(.resizeAspect)
+            let arguments = TransformImageArguments(corners: ImageCorners(topLeft: .Corner(topLeftRadius), topRight: .Corner(topRightRadius), bottomLeft: .Corner(bottomLeftRadius), bottomRight: .Corner(bottomRightRadius)), imageSize: fitted, boundingSize: size, intrinsicInsets: NSEdgeInsets(), resizeMode: .blurBackground)
 
             player.setSignal(signal: cachedMedia(media: media, arguments: arguments, scale: backingScaleFactor, positionFlags: positionFlags), clearInstantly: mediaUpdated)
 
@@ -292,36 +293,38 @@ class ChatGIFContentView: ChatMediaContentView {
     }
     
     override open func copy() -> Any {
-        let view = NSView()
-        view.wantsLayer = true
+        return player.copy()
         
-        view.background = .clear
-        view.layer?.contents = player.layer?.contents
-        view.frame = self.visibleRect
-        view.layer?.masksToBounds = true
-        
-        
-        if bounds != visibleRect {
-            if let image = player.layer?.contents {
-                view.layer?.contents = generateImage(player.bounds.size, contextGenerator: { size, ctx in
-                    ctx.clear(player.bounds)
-                    ctx.setFillColor(.clear)
-                    ctx.fill(player.bounds)
-                    
-                    if player.visibleRect.minY == 0  {
-                        ctx.clip(to: NSMakeRect(0, 0, player.bounds.width, player.bounds.height - ( player.bounds.height - player.visibleRect.height)))
-                    } else {
-                        ctx.clip(to: NSMakeRect(0, (player.bounds.height - player.visibleRect.height), player.bounds.width, player.bounds.height - ( player.bounds.height - player.visibleRect.height)))
-                    }
-                    ctx.draw(image as! CGImage, in: player.bounds)
-                }, opaque: false)
-            }
-        }
-        
-        view.layer?.shouldRasterize = true
-        view.layer?.rasterizationScale = backingScaleFactor
-        
-        return view
+//        let view = NSView()
+//        view.wantsLayer = true
+//
+//        view.background = .clear
+//        view.layer?.contents = player.layer?.contents
+//        view.frame = self.visibleRect
+//        view.layer?.masksToBounds = true
+//
+//
+//        if bounds != visibleRect {
+//            if let image = player.layer?.contents {
+//                view.layer?.contents = generateImage(player.bounds.size, contextGenerator: { size, ctx in
+//                    ctx.clear(player.bounds)
+//                    ctx.setFillColor(.clear)
+//                    ctx.fill(player.bounds)
+//
+//                    if player.visibleRect.minY == 0  {
+//                        ctx.clip(to: NSMakeRect(0, 0, player.bounds.width, player.bounds.height - ( player.bounds.height - player.visibleRect.height)))
+//                    } else {
+//                        ctx.clip(to: NSMakeRect(0, (player.bounds.height - player.visibleRect.height), player.bounds.width, player.bounds.height - ( player.bounds.height - player.visibleRect.height)))
+//                    }
+//                    ctx.draw(image as! CGImage, in: player.bounds)
+//                }, opaque: false)
+//            }
+//        }
+//
+//        view.layer?.shouldRasterize = true
+//        view.layer?.rasterizationScale = backingScaleFactor
+//
+//        return view
     }
     
 }

@@ -9,9 +9,10 @@
 import Cocoa
 import WebKit
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 private class WeakGameScriptMessageHandler: NSObject, WKScriptMessageHandler {
     private let f: (WKScriptMessage) -> ()
@@ -178,7 +179,7 @@ class WebGameViewController: TelegramGenericViewController<WKWebView>, WKUIDeleg
         showModal(with: ShareModalController(ShareCallbackObject(context, callback: { peerIds in
             let signals = peerIds.map { forwardGameWithScore(account: context.account, messageId: messageId, to: $0) }
             return combineLatest(signals) |> map { _ in return } |> ignoreValues
-        })), for: mainWindow)
+        })), for: context.window)
     }
     
     

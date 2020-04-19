@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 
 private enum SecretMediaTtl {
     case off
@@ -125,7 +126,7 @@ fileprivate class PreviewSenderView : Control {
         backgroundColor = theme.colors.background
         separator.backgroundColor = theme.colors.border
         textContainerView.backgroundColor = theme.colors.background
-        
+        textView.setBackgroundColor(theme.colors.background)
         closeButton.set(image: theme.icons.modalClose, for: .Normal)
         _ = closeButton.sizeToFit()
         
@@ -135,7 +136,7 @@ fileprivate class PreviewSenderView : Control {
         collageButton.appTooltip = L10n.previewSenderCollageTooltip
         archiveButton.appTooltip = L10n.previewSenderArchiveTooltip
 
-        photoButton.set(image: ControlStyle(highlightColor: theme.colors.grayIcon).highlight(image: theme.icons.chatAttachPhoto), for: .Normal)
+        photoButton.set(image: ControlStyle(highlightColor: theme.colors.grayIcon).highlight(image: theme.icons.previewSenderPhoto), for: .Normal)
         _ = photoButton.sizeToFit()
         
         photoButton.set(handler: { [weak self] _ in
@@ -175,10 +176,10 @@ fileprivate class PreviewSenderView : Control {
             self?.controller?.close()
         }, for: .Click)
         
-        fileButton.set(image: ControlStyle(highlightColor: theme.colors.grayIcon).highlight(image: theme.icons.chatAttachFile), for: .Normal)
+        fileButton.set(image: ControlStyle(highlightColor: theme.colors.grayIcon).highlight(image: theme.icons.previewSenderFile), for: .Normal)
         _ = fileButton.sizeToFit()
         
-        collageButton.set(image: theme.icons.previewCollage, for: .Normal)
+        collageButton.set(image: theme.icons.previewSenderCollage, for: .Normal)
         _ = collageButton.sizeToFit()
         
         archiveButton.set(image: theme.icons.previewSenderArchive, for: .Normal)
@@ -193,6 +194,7 @@ fileprivate class PreviewSenderView : Control {
         headerView.addSubview(archiveButton)
         
         sendButton.set(image: theme.icons.chatSendMessage, for: .Normal)
+        sendButton.autohighlight = false
         _ = sendButton.sizeToFit()
         
         emojiButton.set(image: theme.icons.chatEntertainment, for: .Normal)
@@ -241,7 +243,7 @@ fileprivate class PreviewSenderView : Control {
                 switch chatInteraction.mode {
                 case .history:
                     items.append(SPopoverItem(peer.id == chatInteraction.context.peerId ? L10n.chatSendSetReminder : L10n.chatSendScheduledMessage, {
-                        showModal(with: ScheduledMessageModalController(context: context, scheduleAt: { [weak controller] date in
+                        showModal(with: ScheduledMessageModalController(context: context, peerId: peer.id, scheduleAt: { [weak controller] date in
                             controller?.send(false, atDate: date)
                         }), for: context.window)
                     }))
@@ -480,7 +482,7 @@ private enum PreviewEntry : Comparable, Identifiable {
     var index: Int {
         switch self {
         case let .section(sectionId):
-            return (sectionId * 1000) + sectionId
+            return (sectionId + 1) * 1000 - sectionId
         case let .media(index, sectionId, _, _):
             return (sectionId * 1000) + index
         case let .mediaGroup(index, sectionId, _, _):
@@ -808,11 +810,20 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
     }
     
     func send(_ silent: Bool, atDate: Date? = nil) {
+        
+        let text = self.genericView.textView.string().trimmed
+        if text.length > ChatPresentationInterfaceState.maxShortInput {
+            alert(for: chatInteraction.context.window, info: L10n.chatInputErrorMessageTooLongCountable(text.length - Int(ChatPresentationInterfaceState.maxShortInput)))
+            return
+        }
+        
         switch chatInteraction.mode {
         case .scheduled:
-            showModal(with: ScheduledMessageModalController(context: context, scheduleAt: { [weak self] date in
-                self?.sendCurrentMedia?(silent, date)
-            }), for: context.window)
+            if let peer = chatInteraction.peer {
+                showModal(with: ScheduledMessageModalController(context: context, peerId: peer.id, scheduleAt: { [weak self] date in
+                    self?.sendCurrentMedia?(silent, date)
+                }), for: context.window)
+            }
         case .history:
             sendCurrentMedia?(silent, atDate)
         }
@@ -1104,7 +1115,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
             
             let data = editedData[url]
             let editor = EditImageModalController(data?.originalUrl ?? url, defaultData: data)
-            showModal(with: editor, for: mainWindow)
+            showModal(with: editor, for: mainWindow, animationType: .scaleCenter)
             self.editorDisposable.set((editor.result |> deliverOnMainQueue).start(next: { [weak self] new, editedData in
                 guard let `self` = self else {return}
                 if let index = self.urls.firstIndex(where: { ($0 as NSURL) === (url as NSURL) }) {
@@ -1542,7 +1553,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
     }
     
     func textViewSize(_ textView: TGModernGrowingTextView!) -> NSSize {
-        return NSMakeSize(frame.width - 40, textView.frame.height)
+        return NSMakeSize(textView.frame.width, textView.frame.height)
     }
     
     func textViewIsTypingEnabled() -> Bool {
@@ -1550,7 +1561,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
     }
     
     func maxCharactersLimit(_ textView: TGModernGrowingTextView!) -> Int32 {
-        return 1024
+        return ChatPresentationInterfaceState.maxInput
     }
     
     override func viewClass() -> AnyClass {

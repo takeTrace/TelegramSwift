@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 import MapKit
 
 
@@ -42,18 +43,21 @@ final class ChatInteraction : InterfaceObserver  {
     let context: AccountContext
     let isLogInteraction:Bool
     let disableSelectAbility: Bool
+    let isGlobalSearchMessage: Bool
     private let modifyDisposable:MetaDisposable = MetaDisposable()
     private let mediaDisposable:MetaDisposable = MetaDisposable()
     private let startBotDisposable:MetaDisposable = MetaDisposable()
     private let addContactDisposable:MetaDisposable = MetaDisposable()
     private let requestSessionId:MetaDisposable = MetaDisposable()
+    let editDisposable = MetaDisposable()
     private let disableProxyDisposable = MetaDisposable()
     private let enableProxyDisposable = MetaDisposable()
-    init(chatLocation: ChatLocation, context: AccountContext, mode: ChatMode = .history, isLogInteraction: Bool = false, disableSelectAbility: Bool = false) {
+    init(chatLocation: ChatLocation, context: AccountContext, mode: ChatMode = .history, isLogInteraction: Bool = false, disableSelectAbility: Bool = false, isGlobalSearchMessage: Bool = false) {
         self.chatLocation = chatLocation
         self.context = context
         self.disableSelectAbility = disableSelectAbility
         self.isLogInteraction = isLogInteraction
+        self.isGlobalSearchMessage = isGlobalSearchMessage
         self.presentation = ChatPresentationInterfaceState(chatLocation)
         self.mode = mode
         super.init()
@@ -75,6 +79,8 @@ final class ChatInteraction : InterfaceObserver  {
         }
     }
     
+    var withToggledSelectedMessage:((ChatPresentationInterfaceState)->ChatPresentationInterfaceState)->Void = { _ in }
+    
 
     var setupReplyMessage: (MessageId?) -> Void = {_ in}
     var beginMessageSelection: (MessageId?) -> Void = {_ in}
@@ -86,7 +92,7 @@ final class ChatInteraction : InterfaceObserver  {
     //
     var focusMessageId: (MessageId?, MessageId, TableScrollState) -> Void = {_,_,_  in} // from, to, animated, position
     var sendMedia:([MediaSenderContainer]) -> Void = {_ in}
-    var sendAppFile:(TelegramMediaFile) -> Void = {_ in}
+    var sendAppFile:(TelegramMediaFile, Bool) -> Void = { _,_ in}
     var sendMedias:([Media], ChatTextInputState, Bool, ChatTextInputState?, Bool, Date?) -> Void = {_,_,_,_,_,_ in}
     var focusInputField:()->Void = {}
     var openInfo:(PeerId, Bool, MessageId?, ChatInitialAction?) -> Void = {_,_,_,_  in} // peerId, isNeedOpenChat, postId, initialAction
@@ -104,7 +110,7 @@ final class ChatInteraction : InterfaceObserver  {
     var switchInlinePeer:(PeerId, ChatInitialAction)->Void = {_,_  in}
     var showPreviewSender:([URL], Bool, NSAttributedString?)->Void = {_,_,_  in}
     var setSecretChatMessageAutoremoveTimeout:(Int32?)->Void = {_ in}
-    var toggleNotifications:()->Void = {}
+    var toggleNotifications:(Bool?)->Void = { _ in }
     var removeAndCloseChat:()->Void = {}
     var joinChannel:()->Void = {}
     var returnGroup:()->Void = {}
@@ -131,18 +137,22 @@ final class ChatInteraction : InterfaceObserver  {
     var removeChatInteractively:()->Void = { }
     var updateSearchRequest: (SearchMessagesResultState)->Void = { _ in }
     var searchPeerMessages: (Peer) -> Void = { _ in }
-    var vote:(MessageId, Data?) -> Void = { _, _ in }
+    var vote:(MessageId, [Data], Bool) -> Void = { _, _, _ in }
     var closePoll:(MessageId) -> Void = { _ in }
     var openDiscussion:()->Void = { }
     var addContact:()->Void = {}
     var blockContact: ()->Void = {}
     var openScheduledMessages: ()->Void = {}
+    var openBank: (String)->Void = { _ in }
     
-    var updateReactions: (MessageId, String, @escaping(Bool)->Void)->Void = { _, _, _ in }
+    var getGradientOffsetRect:()->NSRect = {  return .zero }
 
+    var updateReactions: (MessageId, String, @escaping(Bool)->Void)->Void = { _, _, _ in }
     
     let loadingMessage: Promise<Bool> = Promise()
     let mediaPromise:Promise<[MediaSenderContainer]> = Promise()
+    
+    
     
     
     func disableProxy() {
@@ -229,7 +239,7 @@ final class ChatInteraction : InterfaceObserver  {
             inputText.replaceCharacters(in: NSMakeRange(selectedRange.lowerBound, selectedRange.upperBound - selectedRange.lowerBound), with: NSAttributedString(string: text))
             selectedRange = selectedRange.lowerBound ..< selectedRange.lowerBound
         } else {
-            inputText.insert(NSAttributedString(string: text), at: selectedRange.lowerBound)
+            inputText.insert(NSAttributedString(string: text, font: .normal(theme.fontSize)), at: selectedRange.lowerBound)
         }
         
 
@@ -246,6 +256,31 @@ final class ChatInteraction : InterfaceObserver  {
         self.update({$0.withUpdatedEffectiveInputState(state)})
         
         return selectedRange.lowerBound ..< selectedRange.lowerBound + text.length
+    }
+    
+    func cancelEditing(_ force: Bool = false) {
+        if let editState = self.presentation.interfaceState.editState {
+            let oldState = ChatEditState(message: editState.message)
+            if force {
+                self.update({$0.withoutEditMessage().updatedUrlPreview(nil)})
+            } else {
+                switch editState.loadingState {
+                case .loading, .progress:
+                    editDisposable.set(nil)
+                    self.update({$0.updatedInterfaceState({$0.updatedEditState({$0?.withUpdatedLoadingState(.none)})})})
+                    return
+                default:
+                    if oldState.inputState.attributedString != editState.inputState.attributedString {
+                        confirm(for: context.window, information: L10n.chatEditCancelText, okTitle: L10n.alertDiscard, cancelTitle: L10n.alertNO, successHandler: { [weak self] _ in
+                            self?.update({$0.withoutEditMessage().updatedUrlPreview(nil)})
+                        })
+                    } else {
+                        self.update({$0.withoutEditMessage().updatedUrlPreview(nil)})
+                    }
+                }
+            }
+        }
+        
     }
     
     func invokeInitialAction(includeAuto:Bool = false, animated: Bool = true) {
@@ -304,10 +339,8 @@ final class ChatInteraction : InterfaceObserver  {
                 update({
                     $0.withoutInitialAction()
                 })
-            default:
-                update({
-                    $0.withoutInitialAction()
-                })
+            case .ad:
+                break
             }
            
         }
@@ -344,7 +377,7 @@ final class ChatInteraction : InterfaceObserver  {
                         if same {
                             strongSelf.updateInput(with: text)
                         } else {
-                            if let peer = keyboardMessage.inlinePeer {
+                            if let peer = keyboardMessage.inlinePeer ?? keyboardMessage.effectiveAuthor {
                                 strongSelf.context.sharedContext.bindings.rootNavigation().set(modalAction: ShareInlineResultNavigationAction(payload: text, botName: peer.displayTitle), strongSelf.context.sharedContext.layout != .single)
                                 if strongSelf.context.sharedContext.layout == .single {
                                     strongSelf.context.sharedContext.bindings.rootNavigation().push(ForwardChatListController(strongSelf.context))
@@ -353,7 +386,7 @@ final class ChatInteraction : InterfaceObserver  {
                             
                         }
                     case .payment:
-                        alert(for: mainWindow, info: tr(L10n.paymentsUnsupported))
+                        alert(for: strongSelf.context.window, info: L10n.paymentsUnsupported)
                     case let .urlAuth(url, buttonId):
                         let context = strongSelf.context
                         _ = showModalProgress(signal: requestMessageActionUrlAuth(account: strongSelf.context.account, messageId: keyboardMessage.id, buttonId: buttonId), for: context.window).start(next: { result in
@@ -377,6 +410,8 @@ final class ChatInteraction : InterfaceObserver  {
                                 }), for: context.window)
                             }
                         })
+                    case let .setupPoll(isQuiz):
+                        showModal(with: NewPollController(chatInteraction: strongSelf, isQuiz: isQuiz), for: strongSelf.context.window)
                     default:
                         break
                     }
@@ -418,6 +453,7 @@ final class ChatInteraction : InterfaceObserver  {
         requestSessionId.dispose()
         disableProxyDisposable.dispose()
         enableProxyDisposable.dispose()
+        editDisposable.dispose()
     }
     
     

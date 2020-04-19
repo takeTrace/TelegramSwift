@@ -8,10 +8,12 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
-
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import SyncCore
+import OpenSSLEncryption
 
 class ShareViewController: NSViewController {
 
@@ -36,7 +38,7 @@ class ShareViewController: NSViewController {
         declareEncodable(InAppNotificationSettings.self, f: { InAppNotificationSettings(decoder: $0) })
 
         
-        let appGroupName = "6N38VWS5BX.ru.keepcoder.Telegram"
+        let appGroupName = ApiEnvironment.group
         guard let containerUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupName) else {
             return
         }
@@ -47,8 +49,9 @@ class ShareViewController: NSViewController {
         let encryptionParameters = ValueBoxEncryptionParameters(forceEncryptionIfNoSet: true, key: ValueBoxEncryptionParameters.Key(data: deviceSpecificEncryptionParameters.key)!, salt: ValueBoxEncryptionParameters.Salt(data: deviceSpecificEncryptionParameters.salt)!)
 
         
+        
         let accountManager = AccountManager(basePath: containerUrl.path + "/accounts-metadata")
-        let networkArguments = NetworkInitializationArguments(apiId: 2834, languagesCategory: "macos", appVersion: "", voipMaxLayer: 90, appData: .single(nil))
+        let networkArguments = NetworkInitializationArguments(apiId: ApiEnvironment.apiId, apiHash: ApiEnvironment.apiHash, languagesCategory: ApiEnvironment.language, appVersion: ApiEnvironment.version, voipMaxLayer: 90, voipVersions: [], appData: .single(ApiEnvironment.appData), autolockDeadine: .single(nil), encryptionProvider: OpenSSLEncryptionProvider())
         
         let sharedContext = SharedAccountContext(accountManager: accountManager, networkArguments: networkArguments, rootPath: rootPath, encryptionParameters: encryptionParameters, displayUpgradeProgress: { _ in })
         
@@ -59,8 +62,6 @@ class ShareViewController: NSViewController {
         
         
         
-        
-        
         let themeSemaphore = DispatchSemaphore(value: 0)
         var themeSettings: ThemePaletteSettings = ThemePaletteSettings.defaultTheme
         _ = (themeSettingsView(accountManager: accountManager) |> take(1)).start(next: { settings in
@@ -68,7 +69,6 @@ class ShareViewController: NSViewController {
             themeSemaphore.signal()
         })
         themeSemaphore.wait()
-        
         
         var localization: LocalizationSettings? = nil
         let localizationSemaphore = DispatchSemaphore(value: 0)
@@ -84,11 +84,8 @@ class ShareViewController: NSViewController {
         
         updateTheme(with: themeSettings)
         
-        
-        
         let extensionContext = self.extensionContext!
         
-
         initializeAccountManagement()
         
         let rawAccounts = sharedContext.activeAccounts
@@ -115,18 +112,15 @@ class ShareViewController: NSViewController {
                 let cancelError = NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError, userInfo: nil)
                 extensionContext.cancelRequest(withError: cancelError)
             })
-            
             self.passlock = passlock
             
             let passlockView = passlock.view
-            
             _ = (passlock.doneValue |> filter { $0 } |> take(1)).start(next: { [weak passlockView] _ in
                 passlockView?._change(opacity: 0, animated: true, removeOnCompletion: false, duration: 0.2, timingFunction: .spring, completion: { _ in
                     passlockView?.removeFromSuperview()
                     self.passlock = nil
                 })
             })
-            
             passlock.view.frame = self.view.bounds
             self.view.addSubview(passlock.view)
         default:
@@ -139,7 +133,7 @@ class ShareViewController: NSViewController {
             
         } |> deliverOnMainQueue).start(next: { context in
                 assert(Queue.mainQueue().isCurrent())
-                
+            
                 if let context = context {
                     context.rootController.view.frame = self.view.bounds
                     
@@ -149,12 +143,9 @@ class ShareViewController: NSViewController {
                             contextValue.rootController.view.removeFromSuperview()
                         }
                         self.contextValue = context
-                        
                         self.view.addSubview(context.rootController.view, positioned: .below, relativeTo: self.view.subviews.first)
                         
                     }))
-                    
-                    
                 }
             })
         
@@ -178,10 +169,6 @@ class ShareViewController: NSViewController {
                     return nil
                 }
             })
-        
-
-        
-      
         
     }
 

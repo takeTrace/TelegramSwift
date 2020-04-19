@@ -8,7 +8,8 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 
 class EmptyChatView : View {
     private let containerView: View = View()
@@ -16,6 +17,9 @@ class EmptyChatView : View {
     private let imageView:ImageView = ImageView()
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        self.layer = CAGradientLayer()
+        self.layer?.disableActions()
+        
         addSubview(containerView)
         containerView.addSubview(imageView)
         containerView.addSubview(label)
@@ -93,7 +97,7 @@ class EmptyChatViewController: TelegramGenericViewController<EmptyChatView> {
     @available(OSX 10.12.2, *)
     override func makeTouchBar() -> NSTouchBar? {
         if temporaryTouchBar == nil {
-            temporaryTouchBar = ChatListTouchBar(search: { [weak self] in
+            temporaryTouchBar = ChatListTouchBar(context: self.context, search: { [weak self] in
                 self?.context.sharedContext.bindings.globalSearch("")
             }, newGroup: { [weak self] in
                 self?.context.composeCreateGroup()

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 class ChatStickerContentView: ChatMediaContentView {
     private let statusDisposable = MetaDisposable()
     private var image:TransformImageView = TransformImageView()
@@ -50,7 +51,7 @@ class ChatStickerContentView: ChatMediaContentView {
         if let window = window as? Window {
             if let context = context, let peerId = parent?.id.peerId, let media = media as? TelegramMediaFile, let reference = media.stickerReference {
                 
-                showModal(with:StickersPackPreviewModalController(context, peerId: peerId, reference: reference), for:window)
+                showModal(with:StickerPackPreviewModalController(context, peerId: peerId, reference: reference), for:window)
             }
         }
     }
@@ -61,7 +62,7 @@ class ChatStickerContentView: ChatMediaContentView {
         
         if let file = media as? TelegramMediaFile {
             
-            let dimensions =  file.dimensions?.aspectFitted(size) ?? size
+            let dimensions =  file.dimensions?.size.aspectFitted(size) ?? size
             
             let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
             

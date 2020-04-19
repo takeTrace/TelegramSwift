@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 import AVFoundation
 private class ConnectionStatusView : View {
     private var textViewLayout:TextViewLayout?
@@ -57,18 +58,12 @@ private class ConnectionStatusView : View {
             }
             textViewLayout = TextViewLayout(attr, maximumNumberOfLines: 1)
             needsLayout = true
-           // indicator.animates = true
         }
     }
     private let textView:TextView = TextView()
     private let indicator:ProgressIndicator = ProgressIndicator()
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-       // indicator.setFrameSize(18,18)
-//        indicator.numberOfLines = 8
-//        indicator.innerMargin = 3
-//        indicator.widthOfLine = 3
-//        indicator.lengthOfLine = 6
         textView.userInteractionEnabled = false
         textView.isSelectable = false
         addSubview(textView)
@@ -82,7 +77,7 @@ private class ConnectionStatusView : View {
         backgroundColor = theme.colors.background
         textView.backgroundColor = theme.colors.background
         disableProxyButton?.set(background: theme.colors.background, for: .Normal)
-        indicator.progressColor = theme.colors.indicatorColor
+        indicator.progressColor = theme.colors.text
         let status = self.status
         self.status = status
     }
@@ -107,8 +102,8 @@ private class ConnectionStatusView : View {
             textView.update(textViewLayout)
             
             if let disableProxyButton = disableProxyButton {
-                disableProxyButton.setFrameOrigin(indicator.frame.maxX + 2, floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2) + 2)
-                textView.setFrameOrigin(indicator.frame.maxX + 8, floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2) - textView.frame.height + 2)
+                disableProxyButton.setFrameOrigin(indicator.frame.maxX + 3, floorToScreenPixels(backingScaleFactor, frame.height / 2) + 2)
+                textView.setFrameOrigin(indicator.frame.maxX + 8, floorToScreenPixels(backingScaleFactor, frame.height / 2) - textView.frame.height + 2)
             } else {
                 textView.setFrameOrigin(NSMakePoint(indicator.frame.maxX + 4, f.origin.y))
             }
@@ -491,6 +486,9 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
         super.updateLocalizationAndTheme(theme: theme)
         let theme = (theme as! TelegramPresentationTheme)
         searchButton.set(image: theme.icons.chatSearch, for: .Normal)
+        searchButton.set(image: theme.icons.chatSearchActive, for: .Highlight)
+
+        
         _ = searchButton.sizeToFit()
         
         callButton.set(image: theme.icons.chatCall, for: .Normal)

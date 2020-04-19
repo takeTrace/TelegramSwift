@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 class StickerPackRowItem: TableRowItem {
     
@@ -57,7 +58,7 @@ class StickerPackRowItem: TableRowItem {
     }
     
     func contentNode()->ChatMediaContentView.Type {
-        return ChatMediaAnimatedStickerView.self
+        return MediaAnimatedStickerView.self
     }
     
     override func viewClass() -> AnyClass {
@@ -429,6 +430,8 @@ private final class AnimatedStickerPackRowView : HorizontalRowView {
         overlay.isSelected = item.isSelected
         
         super.set(item: item, animated: animated)
+        
+        needsLayout = true
     }
     
     override func layout() {

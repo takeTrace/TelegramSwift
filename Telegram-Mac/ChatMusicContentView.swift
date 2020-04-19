@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 
 class ChatMusicContentView: ChatAudioContentView {
@@ -73,7 +74,7 @@ class ChatMusicContentView: ChatAudioContentView {
         imageView.layer?.contents = theme.icons.chatMusicPlaceholder
 
         
-        let image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [TelegramMediaImageRepresentation(dimensions: iconSize, resource: resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil)
+        let image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: [TelegramMediaImageRepresentation(dimensions: PixelDimensions(iconSize), resource: resource)], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
         
         imageView.setSignal(signal: cachedMedia(media: media, arguments: arguments, scale: backingScaleFactor, positionFlags: positionFlags), clearInstantly: false)
         
@@ -129,7 +130,7 @@ class ChatMusicContentView: ChatAudioContentView {
     
     override func layout() {
         super.layout()
-        let center = floorToScreenPixels(scaleFactor: backingScaleFactor, frame.height / 2.0)
+        let center = floorToScreenPixels(backingScaleFactor, frame.height / 2.0)
         textView.setFrameOrigin(leftInset, center - textView.frame.height - 2)
         durationView.setFrameOrigin(leftInset, center + 2)
     }

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 
 
@@ -27,10 +28,10 @@ fileprivate class ShareButton : Control {
         shareText.update(layout)
         setFrameSize(NSMakeSize(22 + shareText.frame.width + 47, 41))
         layer?.cornerRadius = 20
-        set(background: theme.colors.blueFill, for: .Hover)
-        set(background: theme.colors.blueFill, for: .Normal)
-        set(background: theme.colors.blueFill, for: .Highlight)
-        shareText.backgroundColor = theme.colors.blueFill
+        set(background: theme.colors.accent, for: .Hover)
+        set(background: theme.colors.accent, for: .Normal)
+        set(background: theme.colors.accent, for: .Highlight)
+        shareText.backgroundColor = theme.colors.accent
         needsLayout = true
         updateCount(0)
         shareText.userInteractionEnabled = false
@@ -47,7 +48,7 @@ fileprivate class ShareButton : Control {
     }
     
     func updateCount(_ count:Int) -> Void {
-        badge = BadgeNode(.initialize(string: "\(max(count, 1))", color: theme.colors.blueFill, font: .medium(.small)), .white)
+        badge = BadgeNode(.initialize(string: "\(max(count, 1))", color: theme.colors.accent, font: .medium(.small)), .white)
         badgeView.setFrameSize(badge!.size)
         badge?.view = badgeView
         badge?.setNeedDisplay()
@@ -88,7 +89,7 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
     
     
     required init(frame frameRect: NSRect, shareObject: ShareObject) {
-        tokenizedView = TokenizedView(frame: NSMakeRect(0, 0, 260, 30), localizationFunc: { key in
+        tokenizedView = TokenizedView(frame: NSMakeRect(0, 0, 300, 30), localizationFunc: { key in
             return translate(key: key, [])
         }, placeholderKey: shareObject.searchPlaceholderKey)
         super.init(frame: frameRect)
@@ -96,6 +97,7 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
         backgroundColor = theme.colors.background
         textContainerView.backgroundColor = theme.colors.background
         actionsContainerView.backgroundColor = theme.colors.background
+        textView.setBackgroundColor(theme.colors.background)
         
         addSubview(tokenizedView)
         addSubview(basicSearchView)
@@ -119,6 +121,7 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
   
         
         sendButton.set(image: theme.icons.chatSendMessage, for: .Normal)
+        sendButton.autohighlight = false
         _ = sendButton.sizeToFit()
         
         emojiButton.set(image: theme.icons.chatEntertainment, for: .Normal)
@@ -173,11 +176,27 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
         }
     }
     
+    var hasCommentView: Bool = true {
+        didSet {
+            textContainerView.isHidden = !hasCommentView
+            bottomSeparator.isHidden = !hasCommentView
+            actionsContainerView.isHidden = !hasCommentView
+            needsLayout = true
+        }
+    }
+    
+    var hasSendView: Bool = true {
+        didSet {
+            sendButton.isHidden = !hasSendView
+            needsLayout = true
+        }
+    }
+    
     
     
     func tokenizedViewDidChangedHeight(_ view: TokenizedView, height: CGFloat, animated: Bool) {
         searchView._change(pos: NSMakePoint(50, 10), animated: animated)
-        tableView.change(size: NSMakeSize(frame.width, frame.height - height - 20 - textView.frame.height - 16), animated: animated)
+        tableView.change(size: NSMakeSize(frame.width, frame.height - height - 20 - (textContainerView.isHidden ? 0 : textContainerView.frame.height)), animated: animated)
         tableView.change(pos: NSMakePoint(0, height + 20), animated: animated)
         topSeparator.change(pos: NSMakePoint(0, searchView.frame.maxY + 10), animated: animated)
     }
@@ -187,7 +206,7 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
         textContainerView.change(size: NSMakeSize(frame.width, height + 16), animated: animated)
         textContainerView.change(pos: NSMakePoint(0, frame.height - textContainerView.frame.height), animated: animated)
         textView._change(pos: NSMakePoint(10, height == 34 ? 8 : 11), animated: animated)
-        tableView.change(size: NSMakeSize(frame.width, frame.height - searchView.frame.height - 20 - (hasCaptionView ? 50 : 0)), animated: animated)
+        tableView.change(size: NSMakeSize(frame.width, frame.height - searchView.frame.height - 20 - (!textContainerView.isHidden ? 50 : 0)), animated: animated)
 
         actionsContainerView.change(pos: NSMakePoint(frame.width - actionsContainerView.frame.width, frame.height - actionsContainerView.frame.height), animated: animated)
         
@@ -204,11 +223,17 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
     
     fileprivate override func layout() {
         super.layout()
+        
+        emojiButton.centerY(x: 0)
+        actionsContainerView.setFrameSize((sendButton.isHidden ? 0 : (sendButton.frame.width + 20)) + emojiButton.frame.width + 20, 50)
+
+        sendButton.centerY(x: emojiButton.frame.maxX + 20)
+        
         searchView.setFrameSize(frame.width - 10 - (!dismiss.isHidden ? 40 : 0) - (share.isHidden ? 10 : 50), searchView.frame.height)
         share.setFrameOrigin(frame.width - share.frame.width - 10, 10)
         dismiss.setFrameOrigin(10, 10)
         searchView.setFrameOrigin(10 + (!dismiss.isHidden ? 40 : 0), 10)
-        tableView.frame = NSMakeRect(0, searchView.frame.maxY + 10, frame.width, frame.height - searchView.frame.height - 20 - (hasCaptionView ? 50 : 0))
+        tableView.frame = NSMakeRect(0, searchView.frame.maxY + 10, frame.width, frame.height - searchView.frame.height - 20 - (!textContainerView.isHidden ? 50 : 0))
         topSeparator.frame = NSMakeRect(0, searchView.frame.maxY + 10, frame.width, .borderSize)
         actionsContainerView.setFrameOrigin(frame.width - actionsContainerView.frame.width, frame.height - actionsContainerView.frame.height)
         
@@ -233,24 +258,68 @@ fileprivate class ShareModalView : View, TokenizedProtocol {
     
 }
 
+final class ShareAdditionItem {
+    let peer: Peer
+    let status: String?
+    init(peer: Peer, status: String?) {
+        self.peer = peer
+        self.status = status
+    }
+}
+
+final class ShareAdditionItems {
+    let items: [ShareAdditionItem]
+    let topSeparator: String
+    let bottomSeparator: String
+    init(items: [ShareAdditionItem], topSeparator: String, bottomSeparator: String) {
+        self.items = items
+        self.topSeparator = topSeparator
+        self.bottomSeparator = bottomSeparator
+    }
+}
+
 
 class ShareObject {
+    
+    let additionTopItems:ShareAdditionItems?
+    
     let context: AccountContext
-    init(_ context:AccountContext) {
+    let emptyPerformOnClose: Bool
+    let excludePeerIds: Set<PeerId>
+    let defaultSelectedIds:Set<PeerId>
+    let limit: Int?
+    init(_ context:AccountContext, emptyPerformOnClose: Bool = false, excludePeerIds:Set<PeerId> = [], defaultSelectedIds: Set<PeerId> = [], additionTopItems:ShareAdditionItems? = nil, limit: Int? = nil) {
+        self.limit = limit
         self.context = context
+        self.emptyPerformOnClose = emptyPerformOnClose
+        self.excludePeerIds = excludePeerIds
+        self.additionTopItems = additionTopItems
+        self.defaultSelectedIds = defaultSelectedIds
     }
     
     var multipleSelection: Bool {
         return true
+    }
+    var hasCaptionView: Bool {
+        return true
+    }
+    var interactionOk: String {
+        return L10n.modalOK
     }
     
     var searchPlaceholderKey: String {
         return "ShareModal.Search.Placeholder"
     }
 
+    var alwaysEnableDone: Bool {
+        return false
+    }
     
-    func perform(to entries:[PeerId], comment: String? = nil) -> Signal<Never, NoError> {
+    func perform(to entries:[PeerId], comment: String? = nil) -> Signal<Never, String> {
         return .complete()
+    }
+    func limitReached() {
+        
     }
     
     var hasLink: Bool {
@@ -262,8 +331,10 @@ class ShareObject {
     }
     
     func possibilityPerformTo(_ peer:Peer) -> Bool {
-        return peer.canSendMessage
+        return peer.canSendMessage && !self.excludePeerIds.contains(peer.id)
     }
+    
+    
 }
 
 class ShareLinkObject : ShareObject {
@@ -281,7 +352,7 @@ class ShareLinkObject : ShareObject {
         copyToClipboard(link)
     }
     
-    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, NoError> {
+    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, String> {
         for peerId in peerIds {
             
             if let comment = comment?.trimmed, !comment.isEmpty {
@@ -305,7 +376,7 @@ class ShareContactObject : ShareObject {
         super.init(context)
     }
     
-    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, NoError> {
+    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, String> {
         for peerId in peerIds {
             _ = Sender.shareContact(context: context, peerId: peerId, contact: user).start()
         }
@@ -321,11 +392,14 @@ class ShareCallbackObject : ShareObject {
         super.init(context)
     }
     
-    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, NoError> {
-        return callback(peerIds)
+    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, String> {
+        return callback(peerIds) |> mapError { _ in return String() }
     }
     
 }
+
+
+
 
 class ShareMessageObject : ShareObject {
     fileprivate let messageIds:[MessageId]
@@ -375,7 +449,7 @@ class ShareMessageObject : ShareObject {
         exportLinkDisposable.dispose()
     }
 
-    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, NoError> {
+    override func perform(to peerIds:[PeerId], comment: String? = nil) -> Signal<Never, String> {
         for peerId in peerIds {
             if let comment = comment?.trimmed, !comment.isEmpty {
                 _ = Sender.enqueue(message: EnqueueMessage.message(text: comment, attributes: [], mediaReference: nil, replyToMessageId: nil, localGroupingKey: nil), context: context, peerId: peerId).start()
@@ -393,9 +467,9 @@ class ShareMessageObject : ShareObject {
 final class ForwardMessagesObject : ShareObject {
     fileprivate let messageIds: [MessageId]
     private let disposable = MetaDisposable()
-    init(_ context: AccountContext, messageIds: [MessageId]) {
+    init(_ context: AccountContext, messageIds: [MessageId], emptyPerformOnClose: Bool = false) {
         self.messageIds = messageIds
-        super.init(context)
+        super.init(context, emptyPerformOnClose: emptyPerformOnClose)
     }
     
     deinit {
@@ -406,33 +480,71 @@ final class ForwardMessagesObject : ShareObject {
         return false
     }
     
-    override func perform(to peerIds: [PeerId], comment: String?) -> Signal<Never, NoError> {
+    override func perform(to peerIds: [PeerId], comment: String?) -> Signal<Never, String> {
         let comment = comment != nil && !comment!.isEmpty ? comment : nil
-        return context.account.postbox.messagesAtIds(messageIds)
-            |> map { $0.map { $0.id } }
-            |> deliverOnMainQueue
-            |> mapToSignal { [weak self] messageIds in
-                guard let `self` = self else {
-                    return .complete()
+        let context = self.context
+        
+        let peers = context.account.postbox.transaction { transaction -> Peer? in
+            for peerId in peerIds {
+                if let peer = transaction.getPeer(peerId) {
+                    return peer
                 }
+            }
+            return nil
+        }
+        
+        return combineLatest(context.account.postbox.messagesAtIds(messageIds), peers)
+            |> deliverOnMainQueue
+            |> mapError { _ in return String() }
+            |> mapToSignal {  messages, peer in
+                
+                let messageIds = messages.map { $0.id }
+                
+                if let peer = peer, peer.isChannel {
+                    for message in messages {
+                        if message.isPublicPoll {
+                            return .fail(L10n.pollForwardError)
+                        }
+                    }
+                }
+                
+                let navigation = self.context.sharedContext.bindings.rootNavigation()
                 if let peerId = peerIds.first {
-                    if peerId == self.context.peerId {
-                        _ = Sender.forwardMessages(messageIds: messageIds, context: self.context, peerId: self.context.account.peerId).start()
-                        if let controller = self.context.sharedContext.bindings.rootNavigation().controller as? ChatController {
+                    if peerId == context.peerId {
+                        _ = Sender.forwardMessages(messageIds: messageIds, context: context, peerId: context.account.peerId).start()
+                        if let controller = context.sharedContext.bindings.rootNavigation().controller as? ChatController {
                             controller.chatInteraction.update({$0.withoutSelectionState()})
                         }
                         delay(0.2, closure: {
-                            _ = showModalSuccess(for: mainWindow, icon: theme.icons.successModalProgress, delay: 1.0).start()
+                            _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 1.0).start()
                         })
                     } else {
-                        if let controller = self.context.sharedContext.bindings.rootNavigation().controller as? ChatController, controller.chatInteraction.peerId == peerId {
+                        if let controller = navigation.controller as? ChatController, controller.chatInteraction.peerId == peerId {
                             controller.chatInteraction.update({$0.withoutSelectionState().updatedInterfaceState({$0.withUpdatedForwardMessageIds(messageIds)})})
                         } else {
-                            let controller = ChatController(context: self.context, chatLocation: .peer(peerId), initialAction: .forward(messageIds: messageIds, text: comment, behavior: .automatic))
-                            self.context.sharedContext.bindings.rootNavigation().push(controller)
+                            (navigation.controller as? ChatController)?.chatInteraction.update({ $0.withoutSelectionState() })
                             
-                            return controller.ready.get() |> filter {$0} |> take(1) |> ignoreValues
+                            var existed: Bool = false
+                            navigation.enumerateControllers { controller, _ in
+                                if let controller = controller as? ChatController, controller.chatInteraction.peerId == peerId {
+                                    existed = true
+                                }
+                                return existed
+                            }
+                            let newone: ChatController
+                            if existed {
+                                newone = ChatController(context: context, chatLocation: .peer(peerId), initialAction: .forward(messageIds: messageIds, text: comment, behavior: .automatic))
+                            } else {
+                                newone = ChatAdditionController(context: context, chatLocation: .peer(peerId), initialAction: .forward(messageIds: messageIds, text: comment, behavior: .automatic))
+                            }
+                            navigation.push(newone)
+                            
+                            return newone.ready.get() |> filter {$0} |> take(1) |> ignoreValues |> mapError { _ in return String() }
                         }
+                    }
+                } else {
+                    if let controller = navigation.controller as? ChatController {
+                        controller.chatInteraction.update({$0.withoutSelectionState().updatedInterfaceState({$0.withUpdatedForwardMessageIds(messageIds)})})
                     }
                 }
                 return .complete()
@@ -533,12 +645,12 @@ fileprivate func prepareEntries(from:[SelectablePeersEntry]?, to:[SelectablePeer
         
         switch entry {
         case let .plain(peer, _, presence, drawSeparator):
-            let color = presence?.status.attribute(NSAttributedString.Key.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
-            return  ShortPeerRowItem(initialSize, peer: peer, account:account, stableId: entry.stableId, height: 48, photoSize:NSMakeSize(36, 36), statusStyle: ControlStyle(font: .normal(.text), foregroundColor: peer.id == account.peerId ? theme.colors.grayText : color ?? theme.colors.grayText, highlightColor:.white), status: peer.id == account.peerId ? (multipleSelection ? nil : L10n.forwardToSavedMessages) : presence?.status.string, drawCustomSeparator: drawSeparator, isLookSavedMessage : peer.id == account.peerId, inset:NSEdgeInsets(left: 10, right: 10), interactionType: multipleSelection ? .selectable(selectInteraction) : .plain, action: {
+            let color = presence?.status.string.isEmpty == false ? presence?.status.attribute(NSAttributedString.Key.foregroundColor, at: 0, effectiveRange: nil) as? NSColor : nil
+            return  ShortPeerRowItem(initialSize, peer: peer, account:account, stableId: entry.stableId, height: 48, photoSize:NSMakeSize(36, 36), statusStyle: ControlStyle(font: .normal(.text), foregroundColor: peer.id == account.peerId ? theme.colors.grayText : color ?? theme.colors.grayText, highlightColor:.white), status: peer.id == account.peerId ? (multipleSelection ? nil : L10n.forwardToSavedMessages) : presence?.status.string, drawCustomSeparator: drawSeparator, isLookSavedMessage : peer.id == account.peerId, inset:NSEdgeInsets(left: 10, right: 10), drawSeparatorIgnoringInset: true, interactionType: multipleSelection ? .selectable(selectInteraction) : .plain, action: {
                selectInteraction.action(peer.id)
             })
         case let .secretChat(peer, peerId, _, _, drawSeparator):
-            return  ShortPeerRowItem(initialSize, peer: peer, account :account, stableId: entry.stableId, height: 48, photoSize:NSMakeSize(36, 36), titleStyle: ControlStyle(font: .medium(.title), foregroundColor: theme.colors.accent, highlightColor: .white), statusStyle: ControlStyle(font: .normal(.text), foregroundColor: theme.colors.grayText, highlightColor:.white), status: L10n.composeSelectSecretChat.lowercased(), drawCustomSeparator: drawSeparator, isLookSavedMessage : peer.id == account.peerId, inset:NSEdgeInsets(left: 10, right: 10), interactionType: multipleSelection ? .selectable(selectInteraction) : .plain, action: {
+            return  ShortPeerRowItem(initialSize, peer: peer, account :account, stableId: entry.stableId, height: 48, photoSize:NSMakeSize(36, 36), titleStyle: ControlStyle(font: .medium(.title), foregroundColor: theme.colors.accent, highlightColor: .white), statusStyle: ControlStyle(font: .normal(.text), foregroundColor: theme.colors.grayText, highlightColor:.white), status: L10n.composeSelectSecretChat.lowercased(), drawCustomSeparator: drawSeparator, isLookSavedMessage : peer.id == account.peerId, inset:NSEdgeInsets(left: 10, right: 10), drawSeparatorIgnoringInset: true, interactionType: multipleSelection ? .selectable(selectInteraction) : .plain, action: {
                 selectInteraction.action(peerId)
             })
         case let .separator(text, _):
@@ -551,7 +663,7 @@ fileprivate func prepareEntries(from:[SelectablePeersEntry]?, to:[SelectablePeer
     })
     
     
-    return TableUpdateTransition(deleted: deleted, inserted: inserted, updated: updated, animated: animated, state: animated ? .none(nil) : .saveVisible(.lower), grouping: !animated, animateVisibleOnly: false)
+    return TableUpdateTransition(deleted: deleted, inserted: inserted, updated: updated, animated: animated, state: animated ? .none(nil) : .saveVisible(.lower), grouping: true, animateVisibleOnly: false)
     
 }
 
@@ -574,14 +686,38 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
             let added = value.selected.subtracting(oldValue.selected)
             let removed = oldValue.selected.subtracting(value.selected)
 
-            for item in added {
-                let title = item == share.context.account.peerId ? L10n.peerSavedMessages : value.peers[item]?.compactDisplayTitle ?? tr(L10n.peerDeletedUser)
-                genericView.tokenizedView.addToken(token: SearchToken(name: title, uniqueId: item.toInt64()), animated: animated)
+            
+            let selected = value.selected.filter {
+                $0.namespace != ChatListFilterPeerCategories.Namespace
             }
             
-            for item in removed {
-                genericView.tokenizedView.removeToken(uniqueId: item.toInt64(), animated: animated)
+            if let limit = self.share.limit, selected.count > limit {
+                DispatchQueue.main.async { [unowned self] in
+                    self.selectInteractions.update(animated: true, { current in
+                        var current = current
+                        for peerId in added {
+                            if let peer = current.peers[peerId] {
+                                current = current.withToggledSelected(peerId, peer: peer)
+                            }
+                        }
+                        return current
+                    })
+                    self.share.limitReached()
+                }
+                return
             }
+            
+            let tokens:[SearchToken] = added.map { item in
+                let title = item == share.context.account.peerId ? L10n.peerSavedMessages : value.peers[item]?.compactDisplayTitle ?? L10n.peerDeletedUser
+                return SearchToken(name: title, uniqueId: item.toInt64())
+            }
+            genericView.tokenizedView.addTokens(tokens: tokens, animated: animated)
+            
+            let idsToRemove:[Int64] = removed.map {
+                $0.toInt64()
+            }
+            genericView.tokenizedView.removeTokens(uniqueIds: idsToRemove, animated: animated)
+            self.modal?.interactions?.updateEnables(!value.selected.isEmpty || share.alwaysEnableDone)
             
         }
     }
@@ -746,7 +882,8 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
         genericView.textView.delegate = self
         genericView.hasShareMenu = self.share.hasLink
         genericView.hasCaptionView = self.share.multipleSelection
-
+        genericView.hasCommentView = self.share.hasCaptionView
+        genericView.hasSendView = self.share.multipleSelection
         if self.share.multipleSelection {
             search.set(combineLatest(genericView.tokenizedView.textUpdater, genericView.tokenizedView.stateValue.get()) |> map { SearchState(state: $1, request: $0)})
         } else {
@@ -762,13 +899,18 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
         let request = Promise<ChatListIndexRequest>()
         let context = self.share.context
         let selectInteraction = self.selectInteractions
+        
+     
+        
         let share = self.share
         selectInteraction.add(observer: self)
         let previous:Atomic<[SelectablePeersEntry]?> = Atomic(value: nil)
         
         selectInteraction.action = { [weak self] peerId in
             guard let `self` = self else { return }
-            _ = share.perform(to: [peerId], comment: self.genericView.textView.string()).start(completed: { [weak self] in
+            _ = share.perform(to: [peerId], comment: self.genericView.textView.string()).start(error: { error in
+               alert(for: context.window, info: error)
+            }, completed: { [weak self] in
                 self?.close()
             })
         }
@@ -803,160 +945,209 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
         
         let previousChatList:Atomic<ChatListView?> = Atomic(value: nil)
 
+        let multipleSelection = self.share.multipleSelection
         
-        /*
-         if query.state == .Focus, query.request.isEmpty {
-         
-         _ = previousChatList.swap(nil)
-         
-         return combineLatest(context.account.postbox.loadedPeerWithId(context.account.peerId), recentPeers(account: context.account) |> take(1) |> deliverOnPrepareQueue, recentlySearchedPeers(postbox: context.account.postbox) |> take(1) |> deliverOnPrepareQueue) |> map { user, top, recent -> TableUpdateTransition in
-         
-         var entries:[SelectablePeersEntry] = []
-         
-         var contains:[PeerId:PeerId] = [:]
-         
-         
-         var indexId:Int32 = Int32.max
-         
-         let chatListIndex:()-> ChatListIndex = {
-         let index = MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: indexId), timestamp: indexId)
-         indexId -= 1
-         return ChatListIndex(pinningIndex: nil, messageIndex: index)
-         }
-         
-         var topPeers:[Peer] = []
-         
-         switch top {
-         case let .peers(_top):
-         topPeers = _top
-         default:
-         break
-         }
-         
-         entries.append(.plain(user, ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: Int32.max), timestamp: Int32.max)), nil, topPeers.isEmpty && recent.isEmpty))
-         contains[user.id] = user.id
-         
-         if !topPeers.isEmpty {
-         entries.insert(.separator(tr(L10n.searchSeparatorPopular).uppercased(), chatListIndex()), at: 0)
-         
-         var count: Int32 = 0
-         for peer in topPeers {
-         if contains[peer.id] == nil {
-         if share.possibilityPerformTo(peer) {
-         entries.insert(.plain(peer, chatListIndex(), nil, count < 4), at: 0)
-         contains[peer.id] = peer.id
-         count += 1
-         }
-         }
-         if count >= 5 {
-         break
-         }
-         }
-         }
-         
-         if !recent.isEmpty {
-         
-         entries.insert(.separator(tr(L10n.searchSeparatorRecent).uppercased(), chatListIndex()), at: 0)
-         
-         for rendered in recent {
-         if let peer = rendered.peer.chatMainPeer {
-         if contains[peer.id] == nil {
-         if share.possibilityPerformTo(peer) {
-         entries.insert(.plain(peer, chatListIndex(), nil, true), at: 0)
-         contains[peer.id] = peer.id
-         }
-         }
-         }
-         }
-         }
-         
-         entries.sort(by: <)
-         
-         return prepareEntries(from: previous.swap(entries), to: entries, account: context.account, initialSize: initialSize, animated: true, multipleSelection: share.multipleSelection, selectInteraction:selectInteraction)
-         
-         }
-         } else
- */
+        
+        let defaultItems = context.account.postbox.transaction { transaction -> [Peer] in
+            var peers:[Peer] = []
+            
+            if let addition = share.additionTopItems {
+                for item in addition.items {
+                    if share.defaultSelectedIds.contains(item.peer.id) {
+                        peers.append(item.peer)
+                    }
+                }
+            }
+           
+            for peerId in share.defaultSelectedIds  {
+                if let peer = transaction.getPeer(peerId) {
+                    peers.append(peer)
+                }
+            }
+            return peers
+        }
         
         let list:Signal<TableUpdateTransition, NoError> = combineLatest(request.get() |> distinctUntilChanged |> deliverOnPrepareQueue, search.get() |> distinctUntilChanged |> deliverOnPrepareQueue) |> mapToSignal { location, query -> Signal<TableUpdateTransition, NoError> in
             
              if query.request.isEmpty {
-                
-                var signal:Signal<(ChatListView,ViewUpdateType), NoError>
-                
-                switch(location) {
-                case let .Initial(count, _):
-                    signal = context.account.viewTracker.tailChatListView(groupId: .root, count: count)
-                case let .Index(index, _):
-                    signal = context.account.viewTracker.aroundChatListView(groupId: .root, index: index, count: 30)
-                }
-                
-                return signal |> deliverOnPrepareQueue |> mapToSignal { value -> Signal<(ChatListView,ViewUpdateType, [PeerId: PeerStatusStringResult], Peer), NoError> in
-                    var peerIds:[PeerId] = []
-                    for entry in value.0.entries {
-                        switch entry {
-                        case let .MessageEntry(_, _, _, _, _, renderedPeer, _, _):
-                            peerIds.append(renderedPeer.peerId)
-                        default:
-                            break
-                        }
-                    }
-                    
-                    _ = previousChatList.swap(value.0)
-                    
-                    let keys = peerIds.map {PostboxViewKey.peer(peerId: $0, components: .all)}
-                    return combineLatest(context.account.postbox.combinedView(keys: keys), context.account.postbox.loadedPeerWithId(context.peerId)) |> map { values, selfPeer in
+                if !multipleSelection && query.state == .Focus {
+                    return combineLatest(context.account.postbox.loadedPeerWithId(context.peerId), recentPeers(account: context.account) |> deliverOnPrepareQueue, recentlySearchedPeers(postbox: context.account.postbox) |> deliverOnPrepareQueue) |> map { user, rawTop, recent -> TableUpdateTransition in
                         
-                        var presences:[PeerId: PeerStatusStringResult] = [:]
-                        for value in values.views {
-                            if let view = value.value as? PeerView {
-                                presences[view.peerId] = stringStatus(for: view, context: context)
+                        var entries:[SelectablePeersEntry] = []
+                        
+                        let top:[Peer]
+                        switch rawTop {
+                        case let .peers(peers):
+                            top = peers
+                        default:
+                            top = []
+                        }
+                        
+                        
+                        var contains:[PeerId:PeerId] = [:]
+                        
+                        var indexId:Int32 = Int32.max
+                        
+                        let chatListIndex:()-> ChatListIndex = {
+                            let index = MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 1, id: indexId), timestamp: indexId)
+                            indexId -= 1
+                            return ChatListIndex(pinningIndex: nil, messageIndex: index)
+                        }
+                        
+                        entries.append(.plain(user, ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: Int32.max), timestamp: Int32.max)), nil, top.isEmpty && recent.isEmpty))
+                        contains[user.id] = user.id
+                        
+                        if !top.isEmpty {
+                            entries.insert(.separator(L10n.searchSeparatorPopular.uppercased(), chatListIndex()), at: 0)
+                            
+                            var count: Int32 = 0
+                            for peer in top {
+                                if contains[peer.id] == nil {
+                                    if share.possibilityPerformTo(peer) {
+                                        entries.insert(.plain(peer, chatListIndex(), nil, count < 4), at: 0)
+                                        contains[peer.id] = peer.id
+                                        count += 1
+                                    }
+                                }
+                                if count >= 5 {
+                                    break
+                                }
                             }
                         }
                         
-                        return (value.0, value.1, presences, selfPeer)
-                        
-                    } |> take(1)
-                } |> deliverOn(prepareQueue) |> take(1) |> map { value -> TableUpdateTransition in
-                    var entries:[SelectablePeersEntry] = []
-                    
-                    var contains:[PeerId:PeerId] = [:]
-                    
-                    
-                    entries.append(.plain(value.3, ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: Int32.max), timestamp: Int32.max)), nil, true))
-                    contains[value.3.id] = value.3.id
-                    
-                    for entry in value.0.entries {
-                        switch entry {
-                        case let .MessageEntry(id, _, _, _, _, renderedPeer, _, _):
-                            if let main = renderedPeer.peer {
-                                if contains[main.id] == nil {
-                                    if share.possibilityPerformTo(main) {
-                                        if let peer = renderedPeer.chatMainPeer {
-                                            if main.id.namespace == Namespaces.Peer.SecretChat {
-                                                entries.append(.secretChat(peer, main.id, id, value.2[peer.id], true))
-                                            } else {
-                                                entries.append(.plain(peer, id, value.2[peer.id], true))
-                                            }
+                        if !recent.isEmpty {
+                            
+                            entries.insert(.separator(L10n.searchSeparatorRecent.uppercased(), chatListIndex()), at: 0)
+                            
+                            for rendered in recent {
+                                if let peer = rendered.peer.chatMainPeer {
+                                    if contains[peer.id] == nil {
+                                        if share.possibilityPerformTo(peer) {
+                                            entries.insert(.plain(peer, chatListIndex(), nil, true), at: 0)
+                                            contains[peer.id] = peer.id
                                         }
-                                        contains[main.id] = main.id
                                     }
                                 }
                             }
-                        default:
-                            break
                         }
+                        
+                        entries.sort(by: <)
+                        
+                        return prepareEntries(from: previous.swap(entries), to: entries, account: context.account, initialSize: initialSize, animated: true, multipleSelection: multipleSelection, selectInteraction:selectInteraction)
+                        
+                    }
+                } else {
+                    var signal:Signal<(ChatListView,ViewUpdateType), NoError>
+                    
+                    
+                    switch(location) {
+                    case let .Initial(count, _):
+                        signal = context.account.viewTracker.tailChatListView(groupId: .root, filterPredicate: nil, count: count)
+                    case let .Index(index, _):
+                        signal = context.account.viewTracker.aroundChatListView(groupId: .root, filterPredicate: nil, index: index, count: 30)
                     }
                     
-                    entries.sort(by: <)
-                    
-                    return prepareEntries(from: previous.swap(entries), to: entries, account: context.account, initialSize: initialSize, animated: true, multipleSelection: share.multipleSelection, selectInteraction:selectInteraction)
+                    return signal |> deliverOnPrepareQueue |> mapToSignal { value -> Signal<(ChatListView,ViewUpdateType, [PeerId: PeerStatusStringResult], Peer), NoError> in
+                        var peerIds:[PeerId] = []
+                        for entry in value.0.entries {
+                            switch entry {
+                            case let .MessageEntry(_, _, _, _, _, renderedPeer, _, _, _, _):
+                                peerIds.append(renderedPeer.peerId)
+                            default:
+                                break
+                            }
+                        }
+                        
+                        _ = previousChatList.swap(value.0)
+                        
+                        let keys = peerIds.map {PostboxViewKey.peer(peerId: $0, components: .all)}
+                        return combineLatest(context.account.postbox.combinedView(keys: keys), context.account.postbox.loadedPeerWithId(context.peerId)) |> map { values, selfPeer in
+                            var presences:[PeerId: PeerStatusStringResult] = [:]
+                            for value in values.views {
+                                if let view = value.value as? PeerView {
+                                    presences[view.peerId] = stringStatus(for: view, context: context)
+                                }
+                            }
+                            
+                            return (value.0, value.1, presences, selfPeer)
+                            
+                        } |> take(1)
+                    } |> deliverOn(prepareQueue) |> take(1) |> map { value -> TableUpdateTransition in
+                        var entries:[SelectablePeersEntry] = []
+                        
+                        var contains:[PeerId:PeerId] = [:]
+                        
+                        var offset: Int32 = Int32.max
+                        
+                        if let additionTopItems = share.additionTopItems {
+                            var index = ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: offset), timestamp: offset))
+                            entries.append(.separator(additionTopItems.topSeparator, index))
+                            offset -= 1
+                            
+                            
+                            for item in additionTopItems.items {
+                                index = ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: offset), timestamp: offset))
+                                let theme = PeerStatusStringTheme()
+                                
+                                let status = NSAttributedString.initialize(string: item.status, color: theme.statusColor, font: theme.statusFont)
+                                let title = NSAttributedString.initialize(string: item.peer.displayTitle, color: theme.titleColor, font: theme.titleFont)
+                                entries.append(.plain(item.peer, index, PeerStatusStringResult(title, status), true))
+                                offset -= 1
+                            }
+                            
+                            index = ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: offset), timestamp: offset))
+                            entries.append(.separator(additionTopItems.bottomSeparator, index))
+                            offset -= 1
+                        }
+                        
+                        if !share.excludePeerIds.contains(value.3.id) {
+                            entries.append(.plain(value.3, ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: offset), timestamp: offset)), nil, true))
+                            contains[value.3.id] = value.3.id
+                        }
+                        
+                        for entry in value.0.entries {
+                            switch entry {
+                            case let .MessageEntry(id, _, _, _, _, renderedPeer, _, _, _, _):
+                                if let main = renderedPeer.peer {
+                                    if contains[main.id] == nil {
+                                        if share.possibilityPerformTo(main) {
+                                            if let peer = renderedPeer.chatMainPeer {
+                                                if main.id.namespace == Namespaces.Peer.SecretChat {
+                                                    entries.append(.secretChat(peer, main.id, id, value.2[peer.id], true))
+                                                } else {
+                                                    entries.append(.plain(peer, id, value.2[peer.id], true))
+                                                }
+                                            }
+                                            contains[main.id] = main.id
+                                        }
+                                    }
+                                }
+                            default:
+                                break
+                            }
+                        }
+                        
+                        entries.sort(by: <)
+                        
+                        return prepareEntries(from: previous.swap(entries), to: entries, account: context.account, initialSize: initialSize, animated: true, multipleSelection: multipleSelection, selectInteraction:selectInteraction)
+                    }
                 }
+                
+                
             } else {
                 
                 _ = previousChatList.swap(nil)
                 
-                let localPeers = context.account.postbox.searchPeers(query: query.request.lowercased())
+                var all = query.request.transformKeyboard
+                all.insert(query.request.lowercased(), at: 0)
+                all = all.uniqueElements
+                let localPeers = combineLatest(all.map {
+                    return context.account.postbox.searchPeers(query: $0)
+                }) |> map { result in
+                    return result.reduce([], {
+                        return $0 + $1
+                    })
+                }
                 
                 let remotePeers = Signal<[RenderedPeer], NoError>.single([]) |> then( searchPeers(account: context.account, query: query.request.lowercased()) |> map { $0.0.map {RenderedPeer($0)} + $0.1.map {RenderedPeer($0)} } )
                 
@@ -978,7 +1169,7 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
                         var entries:[SelectablePeersEntry] = []
                         var contains:[PeerId:PeerId] = [:]
                         var i:Int32 = Int32.max
-                        if L10n.peerSavedMessages.lowercased().hasPrefix(query.request.lowercased()) || NSLocalizedString("Peer.SavedMessages", comment: "nil").lowercased().hasPrefix(query.request.lowercased()) || values.0.contains(where: {$0.peerId == context.peerId}) {
+                        if L10n.peerSavedMessages.lowercased().hasPrefix(query.request.lowercased()) || NSLocalizedString("Peer.SavedMessages", comment: "nil").lowercased().hasPrefix(query.request.lowercased()) || values.0.contains(where: {$0.peerId == context.peerId}), !share.excludePeerIds.contains(values.2.id) {
                             let index = MessageIndex(id: MessageId(peerId: PeerId(0), namespace: 0, id: i), timestamp: i)
                             entries.append(.plain(values.2, ChatListIndex(pinningIndex: 0, messageIndex: index), nil, true))
                             i -= 1
@@ -1011,19 +1202,32 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
                     
                         entries.sort(by: <)
                     
-                        return prepareEntries(from: previous.swap(entries), to: entries, account: context.account, initialSize: initialSize, animated: false, multipleSelection: share.multipleSelection, selectInteraction:selectInteraction)
+                        return prepareEntries(from: previous.swap(entries), to: entries, account: context.account, initialSize: initialSize, animated: false, multipleSelection: multipleSelection, selectInteraction:selectInteraction)
                 }
             }
         } |> deliverOnMainQueue
         
-        disposable.set(list.start(next: { [weak self] transition in
+        let signal:Signal<TableUpdateTransition, NoError> = defaultItems |> deliverOnMainQueue |> mapToSignal { [weak self] defaultSelected in
+            
+            self?.selectInteractions.update(animated: false, { value in
+                var value = value
+                for peer in defaultSelected {
+                    value = value.withToggledSelected(peer.id, peer: peer)
+                }
+                return value
+            })
+            
+            return list
+        } |> deliverOnMainQueue
+        
+        disposable.set(signal.start(next: { [weak self] transition in
             self?.genericView.tableView.resetScrollNotifies()
-            self?.genericView.tableView.merge(with:transition)
-            
+            self?.genericView.tableView.scroll(to: .up(false))
+            self?.genericView.tableView.merge(with: transition)
             self?.genericView.tableView.cancelHighlight()
-        //    self?.genericView.tableView.highlightNext()
-            
+        
             self?.readyOnce()
+            
         }))
         
         
@@ -1032,23 +1236,6 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
         
         self.genericView.tableView.setScrollHandler { position in
             let view = previousChatList.modify({$0})
-            
-            if let view = view {
-//                var messageIndex:ChatListIndex?
-//
-//                switch scroll.direction {
-//                case .bottom:
-//                    messageIndex = view.earlierIndex
-//                case .top:
-//                    messageIndex = view.laterIndex
-//                case .none:
-//                    break
-//                }
-//                if let messageIndex = messageIndex {
-//                  //  _ = animated.swap(false)
-//                  //  request.set(.single(.Index(messageIndex, nil)))
-//                }
-            }
         }
         
     }
@@ -1102,7 +1289,7 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
             }
             return .invoked
         }
-        if !selectInteractions.presentation.peers.isEmpty {
+        if !selectInteractions.presentation.peers.isEmpty || share.alwaysEnableDone {
             
             let ids = selectInteractions.presentation.selected
 
@@ -1185,38 +1372,7 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
                     }
                 }
             })
-            
-            //(context.account.postbox.combin |> take(1) |> deliverOnMainQueue)
-//            _ = signal.start(next: { peerView in
-//
-//                if let peer = peerViewMainPeer(peerView) as? TelegramChannel {
-//                    switch peer.info {
-//                    case let .group(info):
-//                        if info.flags.contains(.slowModeEnabled) {
-//                            if let cachedData = peerView.cachedData as? CachedChannelData, let validUntil = cachedData.slowModeValidUntilTimestamp {
-//                                if validUntil > context.timestamp {
-//                                    alert(for: context.window, info: slowModeTooltipText(validUntil - context.timestamp))
-//                                    return
-//                                }
-//                            }
-//                            if let share = share as? ShareMessageObject {
-//                                if share.messageIds.count > 1 {
-//                                    alert(for: context.window, info: L10n.channelSlowModeMultipleError)
-//                                    return
-//                                }
-//                            }
-//                        }
-//                    default:
-//                        break
-//                    }
-//                }
-//
-//            })
-            
-//            _ = share.perform(to: selectInteractions.presentation.peers.map {$0.key}, comment: genericView.textView.string()).start()
-//            emoji.popover?.hide()
-//            modal?.close(true)
-          
+        
             return .invoked
         }
         
@@ -1310,6 +1466,16 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
         }
     }
     
+    override var modalInteractions: ModalInteractions? {
+        if !share.hasCaptionView {
+            return ModalInteractions(acceptTitle: share.interactionOk, accept: { [weak self] in
+                _ = self?.invoke()
+            }, drawBorder: true, height: 50, singleButton: true)
+        } else {
+            return nil
+        }
+    }
+    
     override func measure(size: NSSize) {
         self.modal?.resize(with:NSMakeSize(genericView.frame.width, min(size.height - 100, genericView.tableView.listHeight + max(genericView.additionHeight, 88))), animated: false)
     }
@@ -1320,6 +1486,13 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
     
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+    }
+    
+    override func close(animationType: ModalAnimationCloseBehaviour = .common) {
+        if self.share.emptyPerformOnClose {
+            _ = self.share.perform(to: []).start()
+        }
+        super.close(animationType: animationType)
     }
     
     deinit {

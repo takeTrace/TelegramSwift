@@ -8,9 +8,10 @@
 
 import Cocoa
 
-import PostboxMac
-import SwiftSignalKitMac
-import TelegramCoreMac
+import Postbox
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 final class CachedStickerAJpegRepresentation: CachedMediaResourceRepresentation {
     let size: CGSize?
@@ -140,6 +141,65 @@ final class CachedAnimatedStickerRepresentation: CachedMediaResourceRepresentati
         }
     }
 }
+
+final class CachedPatternWallpaperMaskRepresentation: CachedMediaResourceRepresentation {
+    let keepDuration: CachedMediaRepresentationKeepDuration = .general
+    
+    let size: CGSize?
+    let settings: WallpaperSettings?
+    var uniqueId: String {
+        
+        var color:String = ""
+        
+        if let settings = settings {
+            color += settings.stringValue
+        }
+        
+        if let size = self.size {
+            return "pattern-wallpaper-mask----\(Int(size.width))x\(Int(size.height))" + color
+        } else {
+            return "pattern-wallpaper-mask----" + color
+        }
+    }
+    
+    init(size: CGSize? = nil, settings: WallpaperSettings? = nil) {
+        self.size = size
+        self.settings = settings
+    }
+    
+    func isEqual(to: CachedMediaResourceRepresentation) -> Bool {
+        if let to = to as? CachedPatternWallpaperMaskRepresentation {
+            return self.size == to.size && self.settings == to.settings
+        } else {
+            return false
+        }
+    }
+}
+
+
+final class CachedDiceRepresentation: CachedMediaResourceRepresentation {
+    let keepDuration: CachedMediaRepresentationKeepDuration = .general
+    
+    let value: String
+    let size: NSSize
+    var uniqueId: String {
+        return value
+    }
+    
+    init(value: String, size: NSSize) {
+        self.value = value
+        self.size = size
+    }
+    
+    func isEqual(to: CachedMediaResourceRepresentation) -> Bool {
+        if let to = to as? CachedDiceRepresentation {
+            return self.value == to.value && self.size == to.size
+        } else {
+            return false
+        }
+    }
+}
+
 
 
 public enum EmojiFitzModifier: Int32, Equatable {

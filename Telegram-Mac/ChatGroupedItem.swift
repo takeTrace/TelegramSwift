@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 class ChatGroupedItem: ChatRowItem {
 
@@ -75,11 +76,13 @@ class ChatGroupedItem: ChatRowItem {
                     }
                 }
                 if hasEntities {
-                    caption = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text.fixed, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), timecode: { _ in }).mutableCopy() as! NSMutableAttributedString
+                    caption = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text.fixed, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), openBank: chatInteraction.openBank).mutableCopy() as! NSMutableAttributedString
                 }
                 
-                
-                caption.detectLinks(type: types, context: context, color: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), openInfo:chatInteraction.openInfo, hashtag: context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy)
+                if !hasEntities || message.flags.contains(.Failed) || message.flags.contains(.Unsent) || message.flags.contains(.Sending) {
+                    caption.detectLinks(type: types, context: context, color: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), openInfo:chatInteraction.openInfo, hashtag: context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy)
+                }
+//                caption.detectLinks(type: types, context: context, color: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), openInfo:chatInteraction.openInfo, hashtag: context.sharedContext.bindings.globalSearch, command: chatInteraction.sendPlainText, applyProxy: chatInteraction.applyProxy)
                 captionLayout = TextViewLayout(caption, alignment: .left, selectText: theme.chat.selectText(isIncoming, entry.renderType == .bubble), strokeLinks: entry.renderType == .bubble, alwaysStaticItems: true)
                 captionLayout?.interactions = globalLinkExecutor
                 
@@ -231,7 +234,7 @@ class ChatGroupedItem: ChatRowItem {
     }
     
     override func makeContentSize(_ width: CGFloat) -> NSSize {
-        layout.measure(NSMakeSize(min(width, 420), min(width, 320)), spacing: hasBubble ? 2 : 4)
+        layout.measure(NSMakeSize(min(width, 360), min(width, 320)), spacing: hasBubble ? 2 : 4)
         return layout.dimensions
     }
     
@@ -263,12 +266,12 @@ class ChatGroupedItem: ChatRowItem {
         
         var items: [ContextMenuItem] = []
         
-        if chatInteraction.mode == .scheduled {
+        if chatInteraction.mode == .scheduled, let peer = chatInteraction.peer {
             items.append(ContextMenuItem(L10n.chatContextScheduledSendNow, handler: {
                 _ = sendScheduledMessageNowInteractively(postbox: context.account.postbox, messageId: message.id).start()
             }))
             items.append(ContextMenuItem(L10n.chatContextScheduledReschedule, handler: {
-                showModal(with: ScheduledMessageModalController(context: context, defaultDate: Date(timeIntervalSince1970: TimeInterval(message.timestamp)) , scheduleAt: { date in
+                showModal(with: ScheduledMessageModalController(context: context, defaultDate: Date(timeIntervalSince1970: TimeInterval(message.timestamp)), peerId: peer.id, scheduleAt: { date in
                     _ = showModalProgress(signal: requestEditMessage(account: context.account, messageId: message.id, text: message.text, media: .keep, scheduleTime: Int32(date.timeIntervalSince1970)), for: context.window).start()
                 }), for: context.window)
             }))
@@ -279,7 +282,7 @@ class ChatGroupedItem: ChatRowItem {
         items.append(ContextMenuItem(tr(L10n.messageContextSelect), handler: { [weak self] in
             guard let `self` = self else {return}
             let messageIds = self.layout.messages.map{$0.id}
-            self.chatInteraction.update({ current in
+            self.chatInteraction.withToggledSelectedMessage({ current in
                 var current = current
                 for id in messageIds {
                     current = current.withToggledSelectedMessage(id)
@@ -429,6 +432,10 @@ class ChatGroupedItem: ChatRowItem {
         }
     }
     
+    override var instantlyResize: Bool {
+        return true
+    }
+    
     override func viewClass() -> AnyClass {
         return ChatGroupedView.self
     }
@@ -441,7 +448,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
     private var selectionBackground: CornerView = CornerView()
     
     
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         guard let item = item as? ChatGroupedItem, let window = window as? Window else { return nil }
         
         let location = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
@@ -452,12 +459,12 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
                 if contentNode is ChatGIFContentView {
                     if let file = contentNode.media as? TelegramMediaFile {
                         let reference = contentNode.parent != nil ? FileMediaReference.message(message: MessageReference(contentNode.parent!), media: file) : FileMediaReference.standalone(media: file)
-                        return .file(reference, GifPreviewModalView.self)
+                        return (.file(reference, GifPreviewModalView.self), contentNode)
                     }
                 } else if contentNode is ChatInteractiveContentView {
                     if let image = contentNode.media as? TelegramMediaImage {
                         let reference = contentNode.parent != nil ? ImageMediaReference.message(message: MessageReference(contentNode.parent!), media: image) : ImageMediaReference.standalone(media: image)
-                        return .image(reference, ImagePreviewModalView.self)
+                        return (.image(reference, ImagePreviewModalView.self), contentNode)
                     }
                 }
             }
@@ -493,7 +500,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
     override func updateColors() {
         super.updateColors()
         selectionBackground.layer?.cornerRadius = .cornerRadius
-        selectionBackground.background = theme.colors.blackTransparent
+        selectionBackground.background = .blackTransparent
     }
     
     override func notify(with value: Any, oldValue: Any, animated: Bool) {
@@ -625,6 +632,8 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
         
         let approximateSynchronousValue = item.approximateSynchronousValue
         
+        contentView.frame = self.contentFrame
+        
         for i in 0 ..< item.layout.count {
             contents[i].change(size: item.layout.frame(at: i).size, animated: animated)
             var positionFlags: LayoutPositionFlags = item.isBubbled ? item.positionFlags ?? item.layout.position(at: i) : []
@@ -676,7 +685,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
             for i in 0 ..< item.layout.count {
                 if NSPointInRect(location, item.layout.frame(at: i)) {
                     let id = item.layout.messages[i].id
-                    item.chatInteraction.update({ current in
+                    item.chatInteraction.withToggledSelectedMessage({ current in
                         if (select && !current.isSelectedMessageId(id)) || (!select && current.isSelectedMessageId(id)) {
                             return current.withToggledSelectedMessage(id)
                         }
@@ -689,7 +698,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
         }
         
         if !applied {
-            item.chatInteraction.update({ current in
+            item.chatInteraction.withToggledSelectedMessage({ current in
                 return item.layout.messages.reduce(current, { current, message -> ChatPresentationInterfaceState in
                     if (select && !current.isSelectedMessageId(message.id)) || (!select && current.isSelectedMessageId(message.id)) {
                         return current.withToggledSelectedMessage(message.id)
@@ -709,7 +718,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
         guard let window = window as? Window else {return}
 
         if onRightClick {
-            item.chatInteraction.update({ current in
+            item.chatInteraction.withToggledSelectedMessage({ current in
                 var current: ChatPresentationInterfaceState = current
                 for message in item.layout.messages {
                     current = current.withToggledSelectedMessage(message.id)
@@ -727,7 +736,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
         if contentView.mouseInside() {
             for i in 0 ..< item.layout.count {
                 if NSPointInRect(location, item.layout.frame(at: i)) {
-                    item.chatInteraction.update({
+                    item.chatInteraction.withToggledSelectedMessage({
                         $0.withToggledSelectedMessage(item.layout.messages[i].id)
                     })
                     selected = true
@@ -739,7 +748,7 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
 
         if !selected {
             let select = !isHasSelectedItem
-            item.chatInteraction.update({ current in
+            item.chatInteraction.withToggledSelectedMessage({ current in
                 return item.layout.messages.reduce(current, { current, message -> ChatPresentationInterfaceState in
                     if (select && !current.isSelectedMessageId(message.id)) || (!select && current.isSelectedMessageId(message.id)) {
                         return current.withToggledSelectedMessage(message.id)

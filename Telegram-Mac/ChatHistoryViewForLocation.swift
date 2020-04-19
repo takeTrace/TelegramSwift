@@ -8,9 +8,10 @@
 
 import Cocoa
 
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 import TGUIKit
 
 enum ChatHistoryInitialSearchLocation {
@@ -52,7 +53,7 @@ func ==(lhs: ChatHistoryLocation, rhs: ChatHistoryLocation) -> Bool {
     case let .Navigation(lhsIndex, lhsAnchorIndex, lhsCount, lhsSide):
         switch rhs {
         case let .Navigation(rhsIndex, rhsAnchorIndex, rhsCount, rhsSide) where lhsIndex == rhsIndex && lhsAnchorIndex == rhsAnchorIndex && lhsCount == rhsCount && lhsSide == rhsSide:
-            return false
+            return true
         default:
             return false
         }
@@ -272,7 +273,15 @@ func chatHistoryViewForLocation(_ location: ChatHistoryLocation, account: Accoun
                
                 var scroll: TableScrollState
                 if view.entries.count > targetIndex {
-                    scroll = .center(id: ChatHistoryEntryId.message(view.entries[targetIndex].message), innerId: nil, animated: false, focus: .init(focus: true), inset: 0)
+                    let focusMessage = view.entries[targetIndex].message
+                    let mustToFocus: Bool
+                    switch searchLocation {
+                    case let .index(index):
+                        mustToFocus = view.entries[targetIndex].index == index
+                    case let .id(id):
+                        mustToFocus = view.entries[targetIndex].message.id == id
+                    }
+                    scroll = .center(id: ChatHistoryEntryId.message(focusMessage), innerId: nil, animated: false, focus: .init(focus: mustToFocus), inset: 0)
                 } else {
                     scroll = .none(nil)
                 }

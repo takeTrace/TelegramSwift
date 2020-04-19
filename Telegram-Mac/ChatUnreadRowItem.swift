@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 class ChatUnreadRowItem: ChatRowItem {
 
     override var height: CGFloat {
@@ -59,6 +60,12 @@ private class ChatUnreadRowView: TableRowView {
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         self.layerContentsRedrawPolicy = .onSetNeedsDisplay
+        
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 3
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
+        shadow.shadowOffset = NSMakeSize(0, 2)
+        self.shadow = shadow
     }
     
     required init?(coder: NSCoder) {

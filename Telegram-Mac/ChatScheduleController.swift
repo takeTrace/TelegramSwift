@@ -7,8 +7,9 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 
 class ChatScheduleController: ChatController {
     public override init(context: AccountContext, chatLocation:ChatLocation, mode: ChatMode = .scheduled, messageId:MessageId? = nil, initialAction:ChatInitialAction? = nil) {
@@ -31,7 +32,7 @@ class ChatScheduleController: ChatController {
             alert(for: context.window, info: L10n.chatScheduledInlineButtonError)
         }
         
-        chatInteraction.vote = { _, _ in
+        chatInteraction.vote = { _, _, _ in
             alert(for: context.window, info: L10n.chatScheduledInlineButtonError)
         }
     }

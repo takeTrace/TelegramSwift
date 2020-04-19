@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 
 class SelectAccountView: Control {
     
@@ -166,8 +167,8 @@ class ShareModalView : View {
         control.frame = NSMakeRect(frame.width - 30 - 30, 10, 30, 30)
         tableView.frame = NSMakeRect(0, 50, frame.width, frame.height - 50 - 40)
         borderView.frame = NSMakeRect(0, tableView.frame.maxY, frame.width, .borderSize)
-        acceptView.setFrameOrigin(frame.width - acceptView.frame.width - 30, floorToScreenPixels(scaleFactor: backingScaleFactor, tableView.frame.maxY + (40 - acceptView.frame.height) / 2.0))
-        cancelView.setFrameOrigin(acceptView.frame.minX - cancelView.frame.width - 30, floorToScreenPixels(scaleFactor: backingScaleFactor, tableView.frame.maxY + (40 - cancelView.frame.height) / 2.0))
+        acceptView.setFrameOrigin(frame.width - acceptView.frame.width - 30, floorToScreenPixels(backingScaleFactor, tableView.frame.maxY + (40 - acceptView.frame.height) / 2.0))
+        cancelView.setFrameOrigin(acceptView.frame.minX - cancelView.frame.width - 30, floorToScreenPixels(backingScaleFactor, tableView.frame.maxY + (40 - cancelView.frame.height) / 2.0))
     }
     
     required init?(coder: NSCoder) {
@@ -527,7 +528,7 @@ class SESelectController: GenericViewController<ShareModalView>, Notifable {
                         
                         for entry in value.0.entries {
                             switch entry {
-                            case let .MessageEntry(id, _, _, _, _, renderedPeer, _, _):
+                            case let .MessageEntry(id, _, _, _, _, renderedPeer, _, _, _, _):
                                 if let peer = renderedPeer.chatMainPeer {
                                     if !fromSetIds.contains(peer.id), contains[peer.id] == nil {
                                         if peer.canSendMessage {

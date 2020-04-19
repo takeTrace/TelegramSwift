@@ -7,8 +7,9 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 
 struct PossibleContextQueryTypes: OptionSet {
     var rawValue: Int32
@@ -82,7 +83,7 @@ func textInputStateContextQueryRangeAndType(_ inputState: ChatTextInputState, in
         }
         
         
-        let maxUtfIndex = inputText.utf16.index(inputText.utf16.startIndex, offsetBy: inputState.selectionRange.lowerBound)
+        let maxUtfIndex = inputText.utf16.index(inputText.utf16.startIndex, offsetBy: min(inputState.selectionRange.lowerBound, inputText.utf16.count))
         guard let maxIndex = maxUtfIndex.samePosition(in: inputText) else {
             return nil
         }
@@ -91,7 +92,7 @@ func textInputStateContextQueryRangeAndType(_ inputState: ChatTextInputState, in
         }
         var index = inputText.index(before: maxIndex)
         
-        if inputText.isSingleEmoji {
+        if inputText.length <= 6, inputText.isSingleEmoji {
             var inputText = inputText
             if inputText.canHaveSkinToneModifier {
                 inputText = inputText.emojiUnmodified
@@ -142,7 +143,7 @@ func textInputStateContextQueryRangeAndType(_ inputState: ChatTextInputState, in
         characterSet.insert(atScalar.unicodeScalars.first!)
         characterSet.insert(slashScalar.unicodeScalars.first!)
         characterSet.insert(emojiScalar.unicodeScalars.first!)
-        while true {
+        for _ in 0 ..< 20 {
             let c = inputText[index]
             
             
@@ -221,11 +222,23 @@ func inputContextQueryForChatPresentationIntefaceState(_ chatPresentationInterfa
         if chatPresentationInterfaceState.state == .editing && (possibleTypes != [.contextRequest] && possibleTypes != [.mention] && possibleTypes != [.emoji]) {
             return .none
         }
+        var possibleQueryRange = possibleQueryRange
+//        if possibleQueryRange.upperBound > inputState.inputText.endIndex {
+//            possibleQueryRange = possibleQueryRange.lowerBound ..< inputState.inputText.endIndex
+//        }
         
-        
+//        possibleQueryRange.lowerBound.encodedOffset
+//        
+//        if let index = inputState.inputText.index(possibleQueryRange.upperBound, offsetBy: 0, limitedBy: inputState.inputText.endIndex) {
+//            possibleQueryRange = possibleQueryRange.lowerBound ..< index
+//        } else {
+//            return .none
+//        }
+
+
         
         let value = inputState.inputText[possibleQueryRange]
-        let query = String(value) //.substring(with: possibleQueryRange)
+        let query = String(value) 
         if possibleTypes == [.hashtag] {
             return .hashtag(query)
         } else if possibleTypes == [.mention] {

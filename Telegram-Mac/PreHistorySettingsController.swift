@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 
@@ -42,14 +43,14 @@ private enum PreHistoryEntryId : Hashable {
 
 private enum PreHistoryEntry : TableItemListNodeEntry {
     case section(Int32)
-    case type(sectionId:Int32, index: Int32, text: String, enabled: Bool, selected: Bool)
-    case text(sectionId:Int32, index: Int32, text: String)
+    case type(sectionId:Int32, index: Int32, text: String, enabled: Bool, selected: Bool, viewType: GeneralViewType)
+    case text(sectionId:Int32, index: Int32, text: String, viewType: GeneralViewType)
     
     var stableId: PreHistoryEntryId {
         switch self {
-        case .type(_, let index, _, _, _):
+        case .type(_, let index, _, _, _, _):
             return .type(index)
-        case .text(_, let index, _):
+        case .text(_, let index, _, _):
             return .text(index)
         case .section(let index):
             return .section(index)
@@ -58,9 +59,9 @@ private enum PreHistoryEntry : TableItemListNodeEntry {
     
     var index:Int32 {
         switch self {
-        case let .type(sectionId, index, _, _, _):
+        case let .type(sectionId, index, _, _, _, _):
             return (sectionId * 1000) + index
-        case let .text(sectionId, index, _):
+        case let .text(sectionId, index, _, _):
             return (sectionId * 1000) + index
         case let .section(sectionId):
             return (sectionId + 1) * 1000 - sectionId
@@ -70,13 +71,13 @@ private enum PreHistoryEntry : TableItemListNodeEntry {
     func item(_ arguments: PreHistoryArguments, initialSize: NSSize) -> TableRowItem {
         switch self {
         case .section:
-            return GeneralRowItem(initialSize, height: 20, stableId: stableId)
-        case let .type(_, _, text, enabled, selected):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: text, type: .selectable(enabled), action: {
+            return GeneralRowItem(initialSize, height: 30, stableId: stableId, viewType: .separator)
+        case let .type(_, _, text, enabled, selected, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: text, type: .selectable(enabled), viewType: viewType, action: {
                 arguments.preHistory(selected)
             })
-        case let .text(_, _, text):
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: text)
+        case let .text(_, _, text, viewType):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, viewType: viewType)
         }
     }
     
@@ -125,17 +126,17 @@ fileprivate func preHistoryEntries(cachedData: CachedChannelData?, isGrpup: Bool
     entries.append(.section(sectionId))
     sectionId += 1
     
-    entries.append(.text(sectionId: sectionId, index: index, text: L10n.preHistorySettingsHeader))
+    entries.append(.text(sectionId: sectionId, index: index, text: L10n.preHistorySettingsHeader, viewType: .textTopItem))
     index += 1
     
     let enabled =  state.enabled ?? cachedData?.flags.contains(.preHistoryEnabled) ?? false
     
-    entries.append(.type(sectionId: sectionId, index: index, text: L10n.peerInfoPreHistoryVisible, enabled: enabled, selected: true))
+    entries.append(.type(sectionId: sectionId, index: index, text: L10n.peerInfoPreHistoryVisible, enabled: enabled, selected: true, viewType: .firstItem))
     index += 1
-    entries.append(.type(sectionId: sectionId, index: index, text: L10n.peerInfoPreHistoryHidden, enabled: !enabled, selected: false))
+    entries.append(.type(sectionId: sectionId, index: index, text: L10n.peerInfoPreHistoryHidden, enabled: !enabled, selected: false, viewType: .lastItem))
     index += 1
     
-    entries.append(.text(sectionId: sectionId, index: index, text: enabled ? L10n.preHistorySettingsDescriptionVisible : isGrpup ? L10n.preHistorySettingsDescriptionGroupHidden : L10n.preHistorySettingsDescriptionHidden))
+    entries.append(.text(sectionId: sectionId, index: index, text: enabled ? L10n.preHistorySettingsDescriptionVisible : isGrpup ? L10n.preHistorySettingsDescriptionGroupHidden : L10n.preHistorySettingsDescriptionHidden, viewType: .textBottomItem))
     index += 1
     
     return entries
@@ -154,6 +155,10 @@ class PreHistorySettingsController: EmptyComposeController<Void, PeerId?, TableV
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        genericView.getBackgroundColor = {
+            theme.colors.listBackground
+        }
         
         let context = self.context
         let peerId = self.peerId
@@ -200,36 +205,45 @@ class PreHistorySettingsController: EmptyComposeController<Void, PeerId?, TableV
                     if peerId.namespace == Namespaces.Peer.CloudGroup {
                         let signal = convertGroupToSupergroup(account: context.account, peerId: peerId)
                             |> map(Optional.init)
-                            |> `catch` { _ -> Signal<PeerId?, NoError> in
-                                return .single(nil)
-                            }
-                            |> mapToSignal { upgradedPeerId -> Signal<PeerId?, NoError> in
+                            |> mapToSignal { upgradedPeerId -> Signal<PeerId?, ConvertGroupToSupergroupError> in
                                 guard let upgradedPeerId = upgradedPeerId else {
                                     return .single(nil)
                                 }
                                 return updateChannelHistoryAvailabilitySettingsInteractively(postbox: context.account.postbox, network: context.account.network, accountStateManager: context.account.stateManager, peerId: upgradedPeerId, historyAvailableForNewMembers: value)
-                                    |> `catch` { _ in return .complete() }
-                                    |> mapToSignal { _ -> Signal<PeerId?, NoError> in
+                                    |> mapError { _ in
+                                        return ConvertGroupToSupergroupError.generic
+                                    }
+                                    |> mapToSignal { _ -> Signal<PeerId?, ConvertGroupToSupergroupError> in
                                         return .complete()
                                     }
-                                    |> then(.single(upgradedPeerId))
+                                    |> then(.single(upgradedPeerId) |> mapError { ConvertGroupToSupergroupError.generic })
                             }
                             |> deliverOnMainQueue
                         
-                        self?.onComplete.set(showModalProgress(signal: signal, for: mainWindow))
+                        _ = showModalProgress(signal: signal, for: context.window).start(next: { [weak self] peerId in
+                            self?.onComplete.set(.single(peerId))
+                        }, error: { error in
+                            switch error {
+                            case .tooManyChannels:
+                                showInactiveChannels(context: context, source: .upgrade)
+                            case .generic:
+                                alert(for: context.window, info: L10n.unknownError)
+                            }
+                        })
+                        
                     } else {
                         let signal: Signal<PeerId?, NoError> = updateChannelHistoryAvailabilitySettingsInteractively(postbox: context.account.postbox, network: context.account.network, accountStateManager: context.account.stateManager, peerId: peerId, historyAvailableForNewMembers: value) |> deliverOnMainQueue |> `catch` { _ in return .complete() } |> map { _ in return nil }
                         
                         if let cachedData = cachedData, let linkedDiscussionPeerId = cachedData.linkedDiscussionPeerId, let peer = peer as? TelegramChannel {
                             confirm(for: context.window, information: L10n.preHistoryConfirmUnlink(peer.displayTitle), successHandler: { [weak self] _ in
                                 if peer.adminRights == nil || !peer.hasPermission(.pinMessages) {
-                                    alert(for: mainWindow, info: L10n.channelErrorDontHavePermissions)
+                                    alert(for: context.window, info: L10n.channelErrorDontHavePermissions)
                                 } else {
                                     let signal = updateGroupDiscussionForChannel(network: context.account.network, postbox: context.account.postbox, channelId: linkedDiscussionPeerId, groupId: nil)
                                         |> `catch` { _ in return .complete() }
                                         |> map { _ -> PeerId? in return nil }
                                         |> then(signal)
-                                    self?.onComplete.set(showModalProgress(signal: signal, for: mainWindow))
+                                    self?.onComplete.set(showModalProgress(signal: signal, for: context.window))
                                 }
                                 
                             })

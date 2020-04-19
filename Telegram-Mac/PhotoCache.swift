@@ -7,10 +7,17 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
+import SyncCore
+
+enum ThemeSource : Equatable {
+    case local(ColorPalette, TelegramTheme?)
+    case cloud(TelegramTheme)
+}
 
 private final class PhotoCachedRecord {
     let date:TimeInterval
@@ -36,22 +43,15 @@ public final class TransformImageResult {
 }
 
 
-private enum PhotoCacheKeyEntry : Hashable {
+enum PhotoCacheKeyEntry : Hashable {
     case avatar(PeerId, TelegramMediaImageRepresentation, NSSize, CGFloat)
     case emptyAvatar(PeerId, String, NSColor, NSSize, CGFloat)
     case media(Media, TransformImageArguments, CGFloat, LayoutPositionFlags?)
+    case platformTheme(TelegramThemeSettings, TransformImageArguments, CGFloat, LayoutPositionFlags?)
     case messageId(stableId: Int64, TransformImageArguments, CGFloat, LayoutPositionFlags)
+    case theme(ThemeSource, Bool)
     var hashValue:Int {
-        switch self {
-        case let .avatar(peerId, _, _, _):
-            return peerId.id.hashValue
-        case let .emptyAvatar(peerId, _, _, _, _):
-            return peerId.id.hashValue
-        case let .messageId(stableId, _, _, _):
-            return stableId.hashValue
-        case let .media(media, _, _, _):
-            return media.id?.id.hashValue ?? 0
-        }
+        return 0
     }
     
     var stringValue: NSString {
@@ -73,9 +73,31 @@ private enum PhotoCacheKeyEntry : Hashable {
                 }
                 #endif
             }
-            return "media-\(String(describing: media.id?.id))-\(transform.imageSize.width)-\(transform.imageSize.height)-\(transform.boundingSize.width)-\(transform.boundingSize.height)-\(scale)-\(String(describing: layout?.rawValue))-\(addition)".nsstring
+            return "media-\(String(describing: media.id?.id))-\(transform)-\(scale)-\(String(describing: layout?.rawValue))-\(addition)".nsstring
         case let .messageId(stableId, transform, scale, layout):
-            return "messageId-\(stableId)-\(transform.imageSize.width)-\(transform.imageSize.height)-\(transform.boundingSize.width)-\(transform.boundingSize.height)-\(scale)-\(layout.rawValue)".nsstring
+            return "messageId-\(stableId)-\(transform)-\(scale)-\(layout.rawValue)".nsstring
+        case let .theme(source, bubbled):
+            switch source {
+            case let .local(palette, cloud):
+                if let settings = cloud?.settings {
+                    #if !SHARE
+                    return "theme-local-\(palette.name)-bubbled\(bubbled ? 1 : 0)-\(settings.desc)".nsstring
+                    #else
+                    return ""
+                    #endif
+                }   else {
+                    return "theme-local-\(palette.name)-bubbled\(bubbled ? 1 : 0)-\(palette.accent.argb)".nsstring
+                }
+            case let .cloud(cloud):
+                return "theme-remote-\(cloud.id)\(String(describing: cloud.file?.id))-bubbled\(bubbled ? 1 : 0)".nsstring
+            }
+        case let .platformTheme(settings, arguments, scale, layout):
+            #if !SHARE
+            return "theme-\(settings.desc)-\(arguments)-\(scale)-\(String(describing: layout?.rawValue))".nsstring
+            #else
+            return ""
+            #endif
+            
         }
     }
     
@@ -134,6 +156,18 @@ private enum PhotoCacheKeyEntry : Hashable {
             } else {
                 return false
             }
+        case let .theme(source, bubbled):
+            if case .theme(source, bubbled) = rhs {
+                return true
+            } else {
+                return false
+            }
+        case let .platformTheme(settings, arguments, scale, position):
+            if case .platformTheme(settings, arguments, scale, position) = rhs {
+                return true
+            } else {
+                return false
+            }
         }
     }
 }
@@ -173,9 +207,10 @@ private class PhotoCache {
 }
 
 
-private let peerPhotoCache = PhotoCache()
+private let peerPhotoCache = PhotoCache(100)
 private let photosCache = PhotoCache(50)
 private let photoThumbsCache = PhotoCache(50)
+private let themeThums = PhotoCache(100)
 
 private let stickersCache = PhotoCache(500)
 
@@ -236,6 +271,20 @@ func cachedMedia(media: Media, arguments: TransformImageArguments, scale: CGFloa
     return .single(TransformImageResult(value, full))
 }
 
+func cachedMedia(media: TelegramThemeSettings, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<TransformImageResult, NoError> {
+    let entry:PhotoCacheKeyEntry = .platformTheme(media, arguments, scale, positionFlags)
+    let value: CGImage?
+    var full: Bool = false
+    
+    if let image = photosCache.cachedImage(for: entry) {
+        value = image
+        full = true
+    } else {
+        value = nil
+    }
+    return .single(TransformImageResult(value, full))
+}
+
 func cachedMedia(messageId: Int64, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Signal<TransformImageResult, NoError> {
     let entry:PhotoCacheKeyEntry = .messageId(stableId: messageId, arguments, scale, positionFlags ?? [])
     let value: CGImage?
@@ -262,6 +311,13 @@ func cacheMedia(_ result: TransformImageResult, media: Media, arguments: Transfo
     }
 }
 
+func cacheMedia(_ result: TransformImageResult, media: TelegramThemeSettings, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Void {
+    if let image = result.image {
+        let entry:PhotoCacheKeyEntry = .platformTheme(media, arguments, scale, positionFlags)
+        photosCache.cacheImage(image, for: entry)
+    }
+}
+
 func cacheMedia(_ result: TransformImageResult, messageId: Int64, arguments: TransformImageArguments, scale: CGFloat, positionFlags: LayoutPositionFlags? = nil) -> Void {
     
     if let image = result.image {
@@ -274,3 +330,31 @@ func cacheMedia(_ result: TransformImageResult, messageId: Int64, arguments: Tra
     }
 }
 
+func cachedThemeThumb(source: ThemeSource, bubbled: Bool) -> Signal<TransformImageResult, NoError> {
+    let entry:PhotoCacheKeyEntry = .theme(source, bubbled)
+    let value: CGImage?
+    var full: Bool = false
+    if let image = themeThums.cachedImage(for: entry) {
+        value = image
+        full = true
+    } else {
+        value = themeThums.cachedImage(for: entry)
+    }
+    if value == nil {
+        var bp:Int = 0
+        bp += 1
+    }
+    return .single(TransformImageResult(value, full))
+}
+
+func cacheThemeThumb(_ result: TransformImageResult, source: ThemeSource, bubbled: Bool) -> Void {
+    let entry:PhotoCacheKeyEntry = .theme(source, bubbled)
+    
+    if let image = result.image {
+        if !result.highQuality {
+            themeThums.cacheImage(image, for: entry)
+        } else {
+            themeThums.cacheImage(image, for: entry)
+        }
+    }
+}

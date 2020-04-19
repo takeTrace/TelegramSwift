@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
+import SwiftSignalKit
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 
 
@@ -23,6 +24,7 @@ enum InputContextEntry : Comparable, Identifiable {
     case contextMediaResult(ChatContextResultCollection?, InputMediaContextRow, Int64)
     case command(PeerCommand, Int64, Int64)
     case sticker(InputMediaStickersRow, Int64)
+    case showPeers(Int, Int64)
     case emoji([String], Bool, Int32)
     case hashtag(String, Int64)
     case inlineRestricted(String)
@@ -40,7 +42,9 @@ enum InputContextEntry : Comparable, Identifiable {
             return index
         case let .command( _, _, stableId):
             return stableId
-        case let .sticker( _, stableId):
+        case let .sticker(_, stableId):
+            return stableId
+        case let .showPeers(_, stableId):
             return stableId
         case let .hashtag(hashtag, _):
             return Int64(hashtag.hashValue)
@@ -65,6 +69,8 @@ enum InputContextEntry : Comparable, Identifiable {
             return index //result.maybeId | ((Int64(index) << 40))
         case let .sticker(_, index):
             return index //result.maybeId | ((Int64(index) << 40))
+        case let .showPeers(index, _):
+            return Int64(index) //result.maybeId | ((Int64(index) << 40))
         case let .hashtag(_, index):
             return index
         case let .emoji(_, _, index):
@@ -112,6 +118,11 @@ func ==(lhs:InputContextEntry, rhs:InputContextEntry) -> Bool {
     case let .sticker(lhsSticker, lhsIndex):
         if case let .sticker(rhsSticker, rhsIndex) = rhs {
             return  lhsSticker == rhsSticker && lhsIndex == rhsIndex
+        }
+        return false
+    case let .showPeers(index, stableId):
+        if case .showPeers(index, stableId) = rhs {
+            return true
         }
         return false
     case let .hashtag(lhsHashtag, lhsIndex):
@@ -178,6 +189,10 @@ fileprivate func prepareEntries(left:[AppearanceWrapperEntry<InputContextEntry>]
             return ContextHashtagRowItem(initialSize, hashtag: "#\(hashtag)")
         case let .sticker(result, stableId):
             return ContextStickerRowItem(initialSize, context, result, stableId, chatInteraction)
+        case .showPeers:
+            return ContextShowPeersHolderItem(initialSize, stableId: entry.stableId, action: {
+                
+            })
         case let .inlineRestricted(text):
             return GeneralTextRowItem(initialSize, stableId: entry.stableId, height: 40, text: text, alignment: .center, centerViewAlignment: true)
         case let .message(_, message, searchText):
@@ -240,11 +255,26 @@ class InputContextView : TableView {
     }
 }
 
+private enum OverscrollState {
+    case small
+    case intermediate
+    case full
+}
+
+private final class OverscrollData {
+    var state:OverscrollState
+    init(state: OverscrollState) {
+        self.state = state
+    }
+}
+
 class InputContextViewController : GenericViewController<InputContextView>, TableViewDelegate {
     
     func findGroupStableId(for stableId: AnyHashable) -> AnyHashable? {
         return nil
     }
+    
+    private let overscrollData: OverscrollData = OverscrollData(state: .small)
     
     fileprivate var markAsNeedShown: Bool = false
     
@@ -277,7 +307,7 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        mainWindow.set(handler: { [weak self] () -> KeyHandlerResult in
+        context.window.set(handler: { [weak self] () -> KeyHandlerResult in
             guard let `self` = self else {return .rejected}
             let prev = self.deselectSelectedHorizontalItem()
             self.highlightInsteadOfSelect ? self.genericView.highlightNext(true,true) : self.genericView.selectNext(true,true)
@@ -285,7 +315,7 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
             return .invoked
         }, with: self, for: .DownArrow, priority: .modal)
         
-        mainWindow.set(handler: {[weak self] () -> KeyHandlerResult in
+        context.window.set(handler: {[weak self] () -> KeyHandlerResult in
             guard let `self` = self else {return .rejected}
             let prev = self.deselectSelectedHorizontalItem()
             self.highlightInsteadOfSelect ? self.genericView.highlightPrev(true,true) : self.genericView.selectPrev(true,true)
@@ -293,7 +323,7 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
             return .invoked
         }, with: self, for: .UpArrow, priority: .modal)
         
-        mainWindow.set(handler: { [weak self] () -> KeyHandlerResult in
+        context.window.set(handler: { [weak self] () -> KeyHandlerResult in
             if let strongSelf = self {
                 if case .stickers = strongSelf.chatInteraction.presentation.inputContext {
                     strongSelf.selectPreviousSticker()
@@ -305,23 +335,23 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
             return .invokeNext
         }, with: self, for: .LeftArrow, priority: .modal)
         
-        mainWindow.set(handler: { () -> KeyHandlerResult in
+        context.window.set(handler: { () -> KeyHandlerResult in
             return .invokeNext
         }, with: self, for: .RightArrow, priority: .modal, modifierFlags: [.command])
         
-        mainWindow.set(handler: { () -> KeyHandlerResult in
+        context.window.set(handler: { () -> KeyHandlerResult in
             return .invokeNext
         }, with: self, for: .UpArrow, priority: .modal, modifierFlags: [.command])
         
-        mainWindow.set(handler: { () -> KeyHandlerResult in
+        context.window.set(handler: { () -> KeyHandlerResult in
             return .invokeNext
         }, with: self, for: .DownArrow, priority: .modal, modifierFlags: [.command])
         
-        mainWindow.set(handler: { () -> KeyHandlerResult in
+        context.window.set(handler: { () -> KeyHandlerResult in
             return .invokeNext
         }, with: self, for: .LeftArrow, priority: .modal, modifierFlags: [.command])
         
-        mainWindow.set(handler: { [weak self] () -> KeyHandlerResult in
+        context.window.set(handler: { [weak self] () -> KeyHandlerResult in
             if let strongSelf = self {
                 if case .stickers = strongSelf.chatInteraction.presentation.inputContext {
                     strongSelf.selectNextSticker()
@@ -331,24 +361,27 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
                 }
             }
             return .invokeNext
-            }, with: self, for: .RightArrow, priority: .modal)
+        }, with: self, for: .RightArrow, priority: .modal)
         
-        mainWindow.set(handler: {[weak self] () -> KeyHandlerResult in
+        context.window.set(handler: {[weak self] () -> KeyHandlerResult in
             if let strongSelf = self {
+                if strongSelf.context.isInGlobalSearch {
+                    return .rejected
+                }
                 return strongSelf.invoke()
             }
             return .invokeNext
         }, with: self, for: .Return, priority: .modal)
         
         
-        mainWindow.set(handler: {[weak self] () -> KeyHandlerResult in
+        context.window.set(handler: {[weak self] () -> KeyHandlerResult in
             if let strongSelf = self {
                 return strongSelf.invokeTab()
             }
             return .invokeNext
         }, with: self, for: .Tab, priority: .modal)
         
-        mainWindow.set(handler: {[weak self] () -> KeyHandlerResult in
+        context.window.set(handler: {[weak self] () -> KeyHandlerResult in
             if self?.genericView.selectedItem() != nil {
                 _ = self?.deselectSelectedHorizontalItem()
                 self?.genericView.cancelSelection()
@@ -357,6 +390,8 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
             }
             return .rejected
         }, with: self, for: .Escape, priority: .modal)
+        
+        
     }
     
     func invoke() -> KeyHandlerResult {
@@ -409,7 +444,7 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
                     _ = chatInteraction.appendText(replacementText, selectedRange: textInputState.selectionRange.lowerBound - distance - atLength ..< textInputState.selectionRange.upperBound)
                 }
             } else if let selectedItem = selectedItem as? ContextStickerRowItem, let index = selectedItem.selectedIndex {
-                chatInteraction.sendAppFile(selectedItem.result.results[index].file)
+                chatInteraction.sendAppFile(selectedItem.result.results[index].file, false)
                 chatInteraction.clearInput()
             } else if let selectedItem = selectedItem as? ContextSearchMessageItem {
                 chatInteraction.focusMessageId(nil, selectedItem.message.id, .center(id: 0, innerId: nil, animated: true, focus: .init(focus: true), inset: 0))
@@ -661,8 +696,8 @@ class InputContextViewController : GenericViewController<InputContextView>, Tabl
                 genericView.separatorView.change(pos: NSMakePoint(0, frame.height - genericView.separatorView.frame.height), animated: animated)
             }
             
-            let y = genericView.position == .above ? relativeView.frame.minY - frame.height : relativeView.frame.maxY
-            genericView.change(pos: NSMakePoint(0, y), animated: animated)
+//            let y = genericView.position == .above ? relativeView.frame.minY - frame.height : relativeView.frame.maxY
+//            genericView.change(pos: NSMakePoint(0, y), animated: animated)
             
             CATransaction.commit()
         }
@@ -723,7 +758,7 @@ class InputContextHelper: NSObject {
             switch position.direction {
             case .bottom:
                 switch result {
-                case let .searchMessages(messages, _):
+                case let .searchMessages(messages, _, _):
                     messages.2(messages.1)
                 case let .contextRequestResult(peer, oldCollection):
                     if let oldCollection = oldCollection, let nextOffset = oldCollection.nextOffset {
@@ -774,8 +809,9 @@ class InputContextHelper: NSObject {
                     controller.genericView.isHidden = false
                     controller.genericView.change(opacity: 1, animated: animated)
                     let y = position == .above ? relativeView.frame.minY - controller.frame.height : relativeView.frame.maxY
-                    controller.genericView.change(pos: NSMakePoint(0, y), animated: animated, duration: 0.4, timingFunction: CAMediaTimingFunctionName.spring)
-
+                    if y != controller.genericView.frame.minY {
+                        controller.genericView._change(pos: NSMakePoint(0, y), animated: animated, duration: 0.4, timingFunction: CAMediaTimingFunctionName.spring, forceAnimateIfHasAnimation: true)
+                    }
                 }
                 
             } else if let controller = self?.controller, let relativeView = relativeView {
@@ -783,7 +819,7 @@ class InputContextHelper: NSObject {
                 controller?.viewWillDisappear(animated)
                 controller?.markAsNeedShown = false
                 if animated {
-                    controller?.genericView.change(pos: NSMakePoint(0, relativeView.frame.minY), animated: animated, removeOnCompletion: false, duration: 0.4, timingFunction: CAMediaTimingFunctionName.spring, completion: { completed in
+                    controller?.genericView._change(pos: NSMakePoint(0, relativeView.frame.minY), animated: animated, removeOnCompletion: false, duration: 0.4, timingFunction: CAMediaTimingFunctionName.spring, forceAnimateIfHasAnimation: true, completion: { completed in
                         if controller?.markAsNeedShown == false {
                             controller?.removeFromSuperview()
                             controller?.genericView.removeAll()
@@ -807,7 +843,7 @@ class InputContextHelper: NSObject {
     
     func entries(for result:ChatPresentationInputQueryResult?, initialSize:NSSize, chatInteraction: ChatInteraction) -> Signal<[InputContextEntry], NoError> {
         if let result = result {
-            return Signal {(subscriber) in
+            return Signal { subscriber in
                 var entries:[InputContextEntry] = []
                 switch result {
                 case let .mentions(peers):
@@ -843,7 +879,9 @@ class InputContextHelper: NSObject {
                             let mediaRows = makeMediaEnties(result.results, isSavedGifs: false, initialSize:NSMakeSize(initialSize.width, 100))
                             
                             for i in 0 ..< mediaRows.count {
-                                entries.append(.contextMediaResult(result, mediaRows[i], Int64(arc4random()) | ((Int64(entries.count) << 40))))
+                                if !mediaRows[i].results.isEmpty {
+                                    entries.append(.contextMediaResult(result, mediaRows[i], Int64(arc4random()) | ((Int64(entries.count) << 40))))
+                                }
                             }
                             
                         }
@@ -882,8 +920,23 @@ class InputContextHelper: NSObject {
                         index += 1
                     }
                    
-                case let .searchMessages(messages, searchText):
+                case let .searchMessages(messages, suggestPeers, searchText):
                     var index: Int64 = 0
+                    
+                    
+                    let count:Int = min(max(6 - messages.0.count, 1), suggestPeers.count)
+                    for i in 0 ..< count {
+                        let peer = suggestPeers[i]
+                        entries.append(.peer(peer, Int(index), arc4random64()))
+                        index += 1
+                    }
+                    
+                   
+//                    if suggestPeers.count > 1, messages.0.count > 0 {
+//                        entries.append(.showPeers(Int(index), arc4random64()))
+//                        index += 1
+//                    }
+                    
                     for message in messages.0 {
                         entries.append(.message(index, message, searchText))
                         index += 1

@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
-import SwiftSignalKitMac
+import Postbox
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
 
 final class StickerPackGridItem: GridItem {
 
@@ -69,12 +70,12 @@ final class StickerPackGridItem: GridItem {
 final class AnimatedStickerGridItemView: GridItemNode, ModalPreviewRowViewProtocol {
     private var currentState: (AccountContext, TelegramMediaFile, CGSize)?
     
-    private let view: ChatMediaAnimatedStickerView = ChatMediaAnimatedStickerView(frame: NSZeroRect)
+    private let view: MediaAnimatedStickerView = MediaAnimatedStickerView(frame: NSZeroRect)
 
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         if let currentState = currentState {
             let reference = currentState.1.stickerReference != nil ? FileMediaReference.stickerPack(stickerPack: currentState.1.stickerReference!, media: currentState.1) : FileMediaReference.standalone(media: currentState.1)
-            return .file(reference, AnimatedStickerPreviewModalView.self)
+            return (.file(reference, AnimatedStickerPreviewModalView.self), view)
         }
         return nil
     }
@@ -149,10 +150,10 @@ final class StickerGridItemView: GridItemNode, ModalPreviewRowViewProtocol {
     
     private let imageView: TransformImageView = TransformImageView()
     
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         if let currentState = currentState {
             let reference = currentState.1.stickerReference != nil ? FileMediaReference.stickerPack(stickerPack: currentState.1.stickerReference!, media: currentState.1) : FileMediaReference.standalone(media: currentState.1)
-            return .file(reference, StickerPreviewModalView.self)
+            return (.file(reference, StickerPreviewModalView.self), imageView)
         }
         return nil
     }
@@ -211,7 +212,7 @@ final class StickerGridItemView: GridItemNode, ModalPreviewRowViewProtocol {
     }
     
     func setup(context: AccountContext, file: TelegramMediaFile) {
-        if let dimensions = file.dimensions {
+        if let dimensions = file.dimensions?.size {
             
             let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: NSMakeSize(60, 60), boundingSize: NSMakeSize(60, 60), intrinsicInsets: NSEdgeInsets())
             imageView.setSignal(signal: cachedMedia(media: file, arguments: arguments, scale: backingScaleFactor))

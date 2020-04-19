@@ -8,13 +8,14 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 
 
 class WPContentView: View, MultipleSelectable, ModalPreviewRowViewProtocol {
     
     
-    func fileAtPoint(_ point: NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point: NSPoint) -> (QuickPreviewMedia, NSView?)? {
         return nil
     }
     
@@ -140,9 +141,9 @@ class WPContentView: View, MultipleSelectable, ModalPreviewRowViewProtocol {
                 
              addSubview(instantPageButton!)
             }
-            instantPageButton?.layer?.borderColor = theme.colors.blueIcon.cgColor
+            instantPageButton?.layer?.borderColor = theme.colors.accentIcon.cgColor
 
-            instantPageButton?.set(color: theme.colors.blueIcon, for: .Normal)
+            instantPageButton?.set(color: theme.colors.accentIcon, for: .Normal)
          
             instantPageButton?.set(font: .medium(.title), for: .Normal)
             instantPageButton?.set(background: .clear, for: .Normal)

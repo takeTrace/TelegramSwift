@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
 import IOKit.pwr_mgt
 
 extension MediaPlayerStatus {
@@ -136,14 +137,22 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         hideControls.set(false)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .mouseMoved, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .mouseExited, priority: .modal)
         
@@ -154,21 +163,33 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         }, with: self, for: .leftMouseDragged, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility()
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .mouseEntered, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
-            self?.updateControlVisibility(true)
-            
+            if let window = self?.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self?.updateControlVisibility()
+                }
+            }
             return .rejected
         }, with: self, for: .leftMouseDown, priority: .modal)
         
         window.set(mouseHandler: { [weak self] (event) -> KeyHandlerResult in
             guard let `self` = self else {return .rejected}
-            
-            self.updateControlVisibility(true)
+            if let window = self.genericView.window, let contentView = window.contentView {
+                let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+                if contentView.hitTest(point) != nil {
+                    self.updateControlVisibility()
+                }
+            }
             self.genericView.subviews.last?.mouseUp(with: event)
             return .rejected
         }, with: self, for: .leftMouseUp, priority: .modal)
@@ -357,13 +378,17 @@ class SVideoController: GenericViewController<SVideoView>, PictureInPictureContr
         genericView.rewindForward()
     }
     
+    var isFullscreen: Bool {
+        return self.fullScreenRestoreState != nil
+    }
+    
     func toggleFullScreen() {
         if let screen = NSScreen.main {
             if let window = fullScreenWindow, let state = fullScreenRestoreState {
                 
                 
                 
-                window.setFrame(NSMakeRect(state.rect.minX, screen.frame.height - state.rect.maxY, state.rect.width, state.rect.height), display: true, animate: true)
+                window.setFrame(NSMakeRect(screen.frame.minX + state.rect.minX, screen.frame.minY + screen.frame.height - state.rect.maxY, state.rect.width, state.rect.height), display: true, animate: true)
                 window.orderOut(nil)
                 view.frame = state.rect
                 state.view.addSubview(view)

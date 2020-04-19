@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 class UndoOverlayHeaderView: NavigationHeaderView {
@@ -18,7 +19,7 @@ class UndoOverlayHeaderView: NavigationHeaderView {
     private let manager: ChatUndoManager
     private let disposable = MetaDisposable()
     private var didSetReady: Bool = false
-    private var timer: SwiftSignalKitMac.Timer?
+    private var timer: SwiftSignalKit.Timer?
     private var progressValue: Double = 0.0
     private var secondsUntilFinish: Int = 0
     private let undoButton = TitleButton()
@@ -34,7 +35,7 @@ class UndoOverlayHeaderView: NavigationHeaderView {
         undoButton.set(font: .medium(.title), for: .Normal)
         undoButton.direction = .right
         undoButton.autohighlight = false
-        
+        border = [.Bottom]
         progress.state = .ImpossibleFetching(progress: 0, force: true)
         
         updateDuration(value: 5, animated: false)
@@ -62,7 +63,7 @@ class UndoOverlayHeaderView: NavigationHeaderView {
             self.self.secondsUntilFinish = value
             
             let textView = TextView()
-            let layout = TextViewLayout.init(.initialize(string: "\(value)", color: NSColor.white, font: .medium(12)))
+            let layout = TextViewLayout.init(.initialize(string: "\(value)", color: theme.colors.text, font: .medium(12)))
             layout.measure(width: .greatestFiniteMagnitude)
             
             
@@ -90,10 +91,7 @@ class UndoOverlayHeaderView: NavigationHeaderView {
     }
     
     private func update(statuses: ChatUndoStatuses) {
-        
-        
-
-        
+                
         if statuses.hasProcessingActions {
             
             let newValue = 1.0 - min(1.0, max(0, statuses.secondsUntilFinish / statuses.maximumDuration))
@@ -105,7 +103,7 @@ class UndoOverlayHeaderView: NavigationHeaderView {
             timer?.invalidate()
             
             
-             timer = SwiftSignalKitMac.Timer(timeout: 0.016, repeat: true, completion: { [weak self] in
+             timer = SwiftSignalKit.Timer(timeout: 0.016, repeat: true, completion: { [weak self] in
                 self?.progressValue = 1.0 - min(1.0, max(0, statuses.secondsUntilFinish / statuses.maximumDuration))
                 self?.updateDuration(value: Int(round(max(1, statuses.secondsUntilFinish))), animated: true)
                 self?.updateProgress(force: true)
@@ -119,7 +117,7 @@ class UndoOverlayHeaderView: NavigationHeaderView {
                 timer?.start()
             }
             
-            let layout = TextViewLayout(.initialize(string: statuses.activeDescription, color: .white, font: .medium(.text)), maximumNumberOfLines: 10)
+            let layout = TextViewLayout(.initialize(string: statuses.activeDescription, color: theme.colors.text, font: .medium(.text)), maximumNumberOfLines: 10)
             textView.update(layout)
             
             progressValue = min(max(newValue, 0), 1.0)
@@ -130,8 +128,6 @@ class UndoOverlayHeaderView: NavigationHeaderView {
             timer?.invalidate()
             timer = nil
         }
-        
-        
         
         
         if !didSetReady {
@@ -163,12 +159,23 @@ class UndoOverlayHeaderView: NavigationHeaderView {
     override func updateLocalizationAndTheme(theme: PresentationTheme) {
         super.updateLocalizationAndTheme(theme: theme)
         let theme = (theme as! TelegramPresentationTheme)
+        
+        self.progress.theme = RadialProgressTheme(backgroundColor: .clear, foregroundColor: theme.colors.text, lineWidth: 2, clockwise: false)
+        
+        let attributed = textView.layout?.attributedString.mutableCopy() as? NSMutableAttributedString
+        if let attributed = attributed {
+            attributed.addAttribute(.foregroundColor, value: theme.colors.text, range: attributed.range)
+            self.textView.update(TextViewLayout(attributed, maximumNumberOfLines: 10))
+        }
+        
+        self.borderColor = theme.colors.border
+        
         undoButton.set(text: L10n.chatUndoManagerUndo, for: .Normal)
         undoButton.set(image: theme.icons.chatUndoAction, for: .Normal)
-        undoButton.set(color: NSColor(0x29ACFF), for: .Normal)
+        undoButton.set(color: theme.colors.accent, for: .Normal)
         
         _ = undoButton.sizeToFit()
-        backgroundColor = NSColor(0x0B131B)
+        backgroundColor = theme.colors.background
 
         needsLayout = true
     }

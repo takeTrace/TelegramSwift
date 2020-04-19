@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 final class SelectPeerPresentation : Equatable {
     let selected:Set<PeerId>
@@ -70,6 +71,7 @@ final class SelectPeerInteraction : InterfaceObserver {
     private(set) var presentation:SelectPeerPresentation = SelectPeerPresentation()
     var close: ()->Void = {}
     var action:(PeerId)->Void = {_ in}
+    var singleUpdater:((SelectPeerPresentation)->Void)? = nil
     func update(animated:Bool = true, _ f:(SelectPeerPresentation)->SelectPeerPresentation)->Void {
         let oldValue = self.presentation
         presentation = f(presentation)
@@ -77,6 +79,7 @@ final class SelectPeerInteraction : InterfaceObserver {
         if oldValue != presentation {
             notifyObservers(value: presentation, oldValue:oldValue, animated:animated)
         }
+        self.singleUpdater?(presentation)
     }
 
 }
@@ -108,7 +111,12 @@ class ShortPeerRowItem: GeneralRowItem {
     let interactionType:ShortPeerItemInteractionType
     let drawSeparatorIgnoringInset:Bool
     var textInset:CGFloat {
-        return inset.left + photoSize.width + 10.0 + (leftImage != nil ? leftImage!.backingSize.width + 5 : 0)
+        switch viewType {
+        case .legacy:
+            return inset.left + photoSize.width + 10.0 + (leftImage != nil ? leftImage!.backingSize.width + 5 : 0)
+        case let .modern(_, insets):
+            return photoSize.width + insets.left + (leftImage != nil ? leftImage!.backingSize.width + 5 : 0)
+        }
     }
     let badgeNode: GlobalBadgeNode?
     let deleteInset:CGFloat
@@ -141,7 +149,7 @@ class ShortPeerRowItem: GeneralRowItem {
     let highlightOnHover: Bool
     let alwaysHighlight: Bool
     private let contextMenuItems:()->[ContextMenuItem]
-    init(_ initialSize:NSSize, peer: Peer, account:Account, stableId:AnyHashable? = nil, enabled: Bool = true, height:CGFloat = 50, photoSize:NSSize = NSMakeSize(36, 36), titleStyle:ControlStyle = ControlStyle(font: .medium(.title), foregroundColor: theme.colors.text, highlightColor: .white), titleAddition:String? = nil, leftImage:CGImage? = nil, statusStyle:ControlStyle = ControlStyle(font:.normal(.text), foregroundColor: theme.colors.grayText, highlightColor:.white), status:String? = nil, borderType:BorderType = [], drawCustomSeparator:Bool = true, isLookSavedMessage: Bool = false, deleteInset:CGFloat? = nil, drawLastSeparator:Bool = false, inset:NSEdgeInsets = NSEdgeInsets(left:10.0), drawSeparatorIgnoringInset: Bool = false, interactionType:ShortPeerItemInteractionType = .plain, generalType:GeneralInteractedType = .none, action:@escaping ()->Void = {}, contextMenuItems:@escaping()->[ContextMenuItem] = {[]}, inputActivity: PeerInputActivity? = nil, highlightOnHover: Bool = false, alwaysHighlight: Bool = false, badgeNode: GlobalBadgeNode? = nil, compactText: Bool = false, highlightVerified: Bool = false) {
+    init(_ initialSize:NSSize, peer: Peer, account:Account, stableId:AnyHashable? = nil, enabled: Bool = true, height:CGFloat = 50, photoSize:NSSize = NSMakeSize(36, 36), titleStyle:ControlStyle = ControlStyle(font: .medium(.title), foregroundColor: theme.colors.text, highlightColor: .white), titleAddition:String? = nil, leftImage:CGImage? = nil, statusStyle:ControlStyle = ControlStyle(font:.normal(.text), foregroundColor: theme.colors.grayText, highlightColor:.white), status:String? = nil, borderType:BorderType = [], drawCustomSeparator:Bool = true, isLookSavedMessage: Bool = false, deleteInset:CGFloat? = nil, drawLastSeparator:Bool = false, inset:NSEdgeInsets = NSEdgeInsets(left:10.0), drawSeparatorIgnoringInset: Bool = false, interactionType:ShortPeerItemInteractionType = .plain, generalType:GeneralInteractedType = .none, viewType: GeneralViewType = .legacy, action:@escaping ()->Void = {}, contextMenuItems:@escaping()->[ContextMenuItem] = {[]}, inputActivity: PeerInputActivity? = nil, highlightOnHover: Bool = false, alwaysHighlight: Bool = false, badgeNode: GlobalBadgeNode? = nil, compactText: Bool = false, highlightVerified: Bool = false) {
         self.peer = peer
         self.contextMenuItems = contextMenuItems
         self.account = account
@@ -151,10 +159,16 @@ class ShortPeerRowItem: GeneralRowItem {
         if let deleteInset = deleteInset {
             self.deleteInset = deleteInset
         } else {
-            self.deleteInset = inset.left
+            switch viewType {
+            case .legacy:
+                self.deleteInset = inset.left
+            case let .modern(_, insets):
+                self.deleteInset = insets.left
+            }
         }
         
         self.badgeNode = badgeNode
+        self.badgeNode?.customLayout = true
         self.alwaysHighlight = alwaysHighlight
         self.highlightOnHover = highlightOnHover
         self.interactionType = interactionType
@@ -171,6 +185,11 @@ class ShortPeerRowItem: GeneralRowItem {
         if isLookSavedMessage && account.peerId == peer.id {
             photo = generateEmptyPhoto(photoSize, type: .icon(colors: theme.colors.peerColors(5), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(photoSize.width - 15, photoSize.height - 15)), cornerRadius: nil)) |> map {($0, false)}
         }
+        
+        if let emptyAvatar = peer.emptyAvatar {
+            self.photo = generateEmptyPhoto(photoSize, type: emptyAvatar) |> map {($0, false)}
+        }
+        
         let _ = tAttr.append(string: isLookSavedMessage && account.peerId == peer.id ? L10n.peerSavedMessages : (compactText ? peer.compactDisplayTitle + (account.testingEnvironment ? " [🤖]" : "") : peer.displayTitle), color: enabled ? titleStyle.foregroundColor : theme.colors.grayText, font: self.titleStyle.font)
         
         if let titleAddition = titleAddition {
@@ -190,7 +209,7 @@ class ShortPeerRowItem: GeneralRowItem {
             statusAttr = sAttr.copy() as? NSAttributedString
         }
         
-        super.init(initialSize, height: height, stableId: stableId ?? AnyHashable(peer.id), type:generalType, action:action, drawCustomSeparator:drawCustomSeparator, border:borderType,inset:inset, enabled: enabled)
+        super.init(initialSize, height: height, stableId: stableId ?? AnyHashable(peer.id), type:generalType, viewType: viewType, action:action, drawCustomSeparator:drawCustomSeparator, border:borderType,inset:inset, enabled: enabled)
         
     }
     
@@ -216,7 +235,7 @@ class ShortPeerRowItem: GeneralRowItem {
         case .selectable(_):
             addition += 30
         case .deletable:
-            addition += 30
+            addition += 24 + 12
         default:
             break
         }
@@ -244,14 +263,29 @@ class ShortPeerRowItem: GeneralRowItem {
             addition += 20
         }
         
-        if let titleAttr = titleAttr {
-            title = TextNode.layoutText(maybeNode: nil,  titleAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - (inset.right == 0 ? 10 : inset.right) - addition - textAdditionInset, 20), nil,false, .left)
-            titleSelected = TextNode.layoutText(maybeNode: nil,  titleAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - (inset.right == 0 ? 10 : inset.right) - addition - textAdditionInset, 20), nil,true, .left)
+        switch viewType {
+        case .legacy:
+            if let titleAttr = titleAttr {
+                title = TextNode.layoutText(maybeNode: nil,  titleAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - (inset.right == 0 ? 10 : inset.right) - addition - textAdditionInset, 20), nil,false, .left)
+                titleSelected = TextNode.layoutText(maybeNode: nil,  titleAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - (inset.right == 0 ? 10 : inset.right) - addition - textAdditionInset, 20), nil,true, .left)
+            }
+            if let statusAttr = statusAttr {
+                status = TextNode.layoutText(maybeNode: nil,  statusAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - (inset.right == 0 ? 10 : inset.right) - addition - textAdditionInset, 20), nil,false, .left)
+                statusSelected = TextNode.layoutText(maybeNode: nil,  statusAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - inset.right - addition - textAdditionInset, 20), nil,true, .left)
+            }
+        case let .modern(_, insets):
+            let textSize = NSMakeSize(self.width - textInset - insets.left - insets.right - inset.left - inset.right - addition - textAdditionInset, 20)
+            if let titleAttr = titleAttr {
+                title = TextNode.layoutText(maybeNode: nil,  titleAttr, nil, 1, .end, textSize, nil, false, .left)
+                titleSelected = TextNode.layoutText(maybeNode: nil, titleAttr, nil, 1, .end, textSize, nil,true, .left)
+            }
+            if let statusAttr = statusAttr {
+                status = TextNode.layoutText(maybeNode: nil,  statusAttr, nil, 1, .end, textSize, nil,false, .left)
+                statusSelected = TextNode.layoutText(maybeNode: nil,  statusAttr, nil, 1, .end, textSize, nil,true, .left)
+            }
         }
-        if let statusAttr = statusAttr {
-            status = TextNode.layoutText(maybeNode: nil,  statusAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - (inset.right == 0 ? 10 : inset.right) - addition - textAdditionInset, 20), nil,false, .left)
-            statusSelected = TextNode.layoutText(maybeNode: nil,  statusAttr, nil, 1, .end, NSMakeSize(self.size.width - textInset - inset.right - addition - textAdditionInset, 20), nil,true, .left)
-        }
+        
+        
     }
    
     var ctxTitle:(TextNodeLayout, TextNode)? {
@@ -262,6 +296,10 @@ class ShortPeerRowItem: GeneralRowItem {
     }
     override func viewClass() -> AnyClass {
         return ShortPeerRowView.self
+    }
+    
+    override var instantlyResize: Bool {
+        return true
     }
     
     deinit {

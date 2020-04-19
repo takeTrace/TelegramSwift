@@ -8,9 +8,10 @@
 
 import Cocoa
 
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 import AVFoundation
 import AVKit
@@ -35,6 +36,8 @@ enum AVPlayerState : Equatable {
         case .paused:
             self = .paused(duration: duration)
         case .waitingToPlayAtSpecifiedRate:
+            self = .waiting
+        @unknown default:
             self = .waiting
         }
     }
@@ -394,7 +397,7 @@ class MGalleryExternalVideoItem: MGalleryItem {
             return .complete()
         } |> deliverOnMainQueue)
         
-        self.image.set(result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil) } |> deliverOnMainQueue)
+        self.image.set(result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil) } |> deliverOnMainQueue)
         
         fetch()
     }

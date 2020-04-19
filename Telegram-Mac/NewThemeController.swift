@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
-import TelegramCoreMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 
 
@@ -40,9 +41,9 @@ private func newThemeEntries(state: NewThemeState) -> [InputDataEntry] {
     sectionId += 1
     
     
-    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.name), error: state.error, identifier: _id_input_name, mode: .plain, placeholder: nil, inputPlaceholder: L10n.newThemePlaceholder, filter: { $0 }, limit: 100))
+    entries.append(.input(sectionId: sectionId, index: index, value: .string(state.name), error: state.error, identifier: _id_input_name, mode: .plain, data: InputDataRowData(), placeholder: nil, inputPlaceholder: L10n.newThemePlaceholder, filter: { $0 }, limit: 100))
     index += 1
-    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.newThemeDesc), color: theme.colors.grayText, detectBold: true))
+    entries.append(.desc(sectionId: sectionId, index: index, text: .plain(L10n.newThemeDesc), data: InputDataGeneralTextData()))
     
     entries.append(.sectionId(sectionId, type: .normal))
     sectionId += 1
@@ -90,7 +91,25 @@ func NewThemeController(context: AccountContext, palette: ColorPalette) -> Input
                     thumbnailData = data
                 }
             }
-            disposable.set(showModalProgress(signal: createTheme(account: context.account, title: name, resource: resource, thumbnailData: thumbnailData)
+//            let baseTheme: TelegramBaseTheme?
+//            switch palette.parent {
+//            case .day:
+//                baseTheme = .day
+//            case .dayClassic:
+//                baseTheme = .classic
+//            case .nightAccent:
+//                baseTheme = .night
+//            default:
+//                baseTheme = nil
+//            }
+//            let settings: TelegramThemeSettings?
+//            if let baseTheme = baseTheme {
+//                settings = .init(baseTheme: baseTheme, accentColor: Int32(palette.accent.rgb), messageColors: (top: Int32(palette.bubbleBackground_outgoing.rgb), Int32(palette.bubbleBackground_outgoing.rgb)), wallpaper: nil)
+//            } else {
+//                settings = nil
+//            }
+//
+            disposable.set(showModalProgress(signal: createTheme(account: context.account, title: name, resource: resource, thumbnailData: thumbnailData, settings: nil)
                 |> filter { value in
                     switch value {
                     case .result:
@@ -144,13 +163,19 @@ func NewThemeController(context: AccountContext, palette: ColorPalette) -> Input
         return .none
     }, afterDisappear: {
         disposable.dispose()
+    }, getBackgroundColor: {
+        theme.colors.background
     })
     
     let modalInteractions = ModalInteractions(acceptTitle: L10n.newThemeCreate, accept: { [weak controller] in
         _ = controller?.returnKeyAction()
-    }, cancelTitle: L10n.modalCancel, drawBorder: true, height: 50)
+    }, drawBorder: true, height: 50, singleButton: true)
     
     let modalController = InputDataModalController(controller, modalInteractions: modalInteractions)
+    
+    controller.leftModalHeader = ModalHeaderData(image: theme.icons.modalClose, handler: { [weak modalController] in
+        modalController?.close()
+    })
     
     close = { [weak modalController] in
         modalController?.modal?.close()

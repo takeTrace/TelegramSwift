@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import PostboxMac
-import TelegramCoreMac
+import SwiftSignalKit
+import Postbox
+import TelegramCore
+import SyncCore
 import TGUIKit
 
 struct LockNotificationsData : Equatable {
@@ -44,8 +45,10 @@ struct LockNotificationsData : Equatable {
 
 final class SharedNotificationBindings {
     let navigateToChat:(Account, PeerId) -> Void
-    init(navigateToChat: @escaping(Account, PeerId) -> Void) {
+    let updateCurrectController:()->Void
+    init(navigateToChat: @escaping(Account, PeerId) -> Void, updateCurrectController: @escaping()->Void) {
         self.navigateToChat = navigateToChat
+        self.updateCurrectController = updateCurrectController
     }
 }
 
@@ -90,14 +93,21 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
             if show {
                 let controller = PasscodeLockController(accountManager, useTouchId: settings.useTouchId, logoutImpl: {
                     return self.logout()
-                })
+                }, updateCurrectController: bindings.updateCurrectController)
                 closeAllModals()
+                closeInstantView()
+                closeGalleryViewer(false)
                 showModal(with: controller, for: window, isOverlay: true)
                 return .single(show) |> then( controller.doneValue |> map {_ in return false} |> take(1) )
             }
             return .never()
             } |> deliverOnMainQueue).start(next: { [weak self] lock in
-                
+                for subview in window.contentView!.subviews {
+                    if let subview = subview as? SplitView {
+                        subview.isHidden = lock
+                        break
+                    }
+                }
                 self?.updateLocked { previous -> LockNotificationsData in
                     return previous.withUpdatedPasscodeLock(lock)
                 }
@@ -113,7 +123,11 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
         
         let passlock = Signal<Void, NoError>.single(Void()) |> delay(10, queue: Queue.concurrentDefaultQueue()) |> restart |> mapToSignal { () -> Signal<Int32?, NoError> in
             return accountManager.transaction { transaction -> Int32? in
-                return transaction.getAccessChallengeData().timeout
+                if transaction.getAccessChallengeData().isLockable {
+                    return passcodeSettings(transaction).timeout
+                } else {
+                    return nil
+                }
             }
             } |> map { [weak self] timeout -> Bool in
                 if let timeout = timeout {
@@ -429,7 +443,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
             
             closeAllModals()
             
-            if notification.activationType == .replied, let text = notification.response?.string {
+            if notification.activationType == .replied, let text = notification.response?.string, !text.isEmpty {
                 var replyToMessageId:MessageId?
                 if messageId.peerId.namespace != Namespaces.Peer.CloudUser {
                     replyToMessageId = messageId

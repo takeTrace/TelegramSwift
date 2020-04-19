@@ -7,10 +7,11 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 class WPArticleLayout: WPLayout {
     
@@ -37,13 +38,19 @@ class WPArticleLayout: WPLayout {
         
         var content = content
         if content.type == "telegram_theme" {
-            if let files = content.files {
-                for file in files {
-                    if file.mimeType == "application/x-tgtheme-macos", !file.previewRepresentations.isEmpty {
-                        content = content.withUpdatedFile(file)
+            for attr in content.attributes {
+                switch attr {
+                case let .theme(theme):
+                    for file in theme.files {
+                        if file.mimeType == "application/x-tgtheme-macos", !file.previewRepresentations.isEmpty {
+                            content = content.withUpdatedFile(file)
+                        }
                     }
+                case .unsupported:
+                    break
                 }
             }
+            
         }
         
         self.downloadSettings = downloadSettings
@@ -97,17 +104,19 @@ class WPArticleLayout: WPLayout {
         }
         
         if let image = content.image, groupLayout == nil {
-            if let dimensions = largestImageRepresentation(image.representations)?.dimensions {
+            if let dimensions = largestImageRepresentation(image.representations)?.dimensions.size {
                 imageSize = dimensions
             }
         }
         
         if let file = content.file, groupLayout == nil {
-            if let dimensions = file.dimensions {
+            if let dimensions = file.dimensions?.size {
                 imageSize = dimensions
             } else if isTheme {
                 imageSize = NSMakeSize(200, 200)
             }
+        } else if isTheme {
+            imageSize = NSMakeSize(260, 260)
         }
         if let wallpaper = wallpaper {
             switch wallpaper {
@@ -115,6 +124,8 @@ class WPArticleLayout: WPLayout {
                 switch preview {
                 case .color:
                     imageSize = NSMakeSize(150, 150)
+                case .gradient:
+                    imageSize = NSMakeSize(200, 200)
                 default:
                     break
                 }
@@ -170,7 +181,7 @@ class WPArticleLayout: WPLayout {
                 contentSize.width = max(groupLayout.dimensions.width, contentSize.width)
             }
             
-            var emptyColor: NSColor? = nil// = NSColor(rgb: 0xd6e2ee, alpha: 0.5)
+            var emptyColor: TransformImageEmptyColor? = nil// = NSColor(rgb: 0xd6e2ee, alpha: 0.5)
             var isColor: Bool = false
             if let wallpaper = wallpaper {
                 switch wallpaper {
@@ -178,13 +189,19 @@ class WPArticleLayout: WPLayout {
                     switch preview {
                     case let .slug(_, settings):
                         var patternIntensity: CGFloat = 0.5
-                        if let color = settings.color {
-                            if let intensity = settings.intensity {
-                                patternIntensity = CGFloat(intensity) / 100.0
-                            }
-                            emptyColor = NSColor(rgb: UInt32(bitPattern: color), alpha: patternIntensity)
+                        
+                        let color = settings.color ?? NSColor(rgb: 0xd6e2ee, alpha: 0.5).argb
+                        if let intensity = settings.intensity {
+                            patternIntensity = CGFloat(intensity) / 100.0
+                        }
+                        if let bottomColor = settings.bottomColor {
+                            emptyColor = .gradient(top: NSColor(argb: color).withAlphaComponent(patternIntensity), bottom: NSColor(rgb: bottomColor).withAlphaComponent(patternIntensity), rotation: settings.rotation)
+                        } else {
+                            emptyColor = .color(NSColor(argb: color))
                         }
                     case .color:
+                        isColor = true
+                    case .gradient:
                         isColor = true
                     }
                 default:
@@ -241,7 +258,6 @@ class WPArticleLayout: WPLayout {
             }
             
             if let imageSize = imageSize {
-               
                 
                 let imageArguments = TransformImageArguments(corners: ImageCorners(radius: 4.0), imageSize: isTheme ? contrainedImageSize : imageSize.aspectFilled(NSMakeSize(maxw, maxw)), boundingSize: contrainedImageSize, intrinsicInsets: NSEdgeInsets(), resizeMode: .blurBackground, emptyColor: emptyColor)
                 

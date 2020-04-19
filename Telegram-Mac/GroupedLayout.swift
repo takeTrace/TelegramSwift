@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 import TGUIKit
-import PostboxMac
+import Postbox
 
 private final class MessagePhotoInfo {
     let mid:MessageId
@@ -395,11 +396,11 @@ class GroupedLayout {
         
         
         for (_, layout) in layouts {
-            layout.layoutFrame = NSMakeRect(floorToScreenPixels(scaleFactor: System.backingScale, layout.layoutFrame.minX), floorToScreenPixels(scaleFactor: System.backingScale, layout.layoutFrame.minY), floorToScreenPixels(scaleFactor: System.backingScale, layout.layoutFrame.width), floorToScreenPixels(scaleFactor: System.backingScale, layout.layoutFrame.height))
+            layout.layoutFrame = NSMakeRect(floorToScreenPixels(System.backingScale, layout.layoutFrame.minX), floorToScreenPixels(System.backingScale, layout.layoutFrame.minY), floorToScreenPixels(System.backingScale, layout.layoutFrame.width), floorToScreenPixels(System.backingScale, layout.layoutFrame.height))
         }
         
         self.layouts = layouts
-        self.dimensions = NSMakeSize(floorToScreenPixels(scaleFactor: System.backingScale, dimensions.width), floorToScreenPixels(scaleFactor: System.backingScale, dimensions.height))
+        self.dimensions = NSMakeSize(floorToScreenPixels(System.backingScale, dimensions.width), floorToScreenPixels(System.backingScale, dimensions.height))
     }
     
     func frame(for messageId: MessageId) -> NSRect {

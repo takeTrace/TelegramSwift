@@ -8,9 +8,35 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import SwiftSignalKitMac
-import PostboxMac
+import TelegramCore
+import SyncCore
+import SwiftSignalKit
+import Postbox
+
+
+enum PrivacyAndSecurityEntryTag: ItemListItemTag {
+    case accountTimeout
+    case topPeers
+    case cloudDraft
+    func isEqual(to other: ItemListItemTag) -> Bool {
+        if let other = other as? PrivacyAndSecurityEntryTag, self == other {
+            return true
+        } else {
+            return false
+        }
+    }
+    
+    fileprivate var stableId: AnyHashable {
+        switch self {
+        case .accountTimeout:
+            return 13
+        case .topPeers:
+            return 19
+        case .cloudDraft:
+            return 22
+        }
+    }
+}
 
 private final class PrivacyAndSecurityControllerArguments {
     let context: AccountContext
@@ -29,7 +55,8 @@ private final class PrivacyAndSecurityControllerArguments {
     let openProxySettings:() ->Void
     let togglePeerSuggestions:(Bool)->Void
     let clearCloudDrafts: () -> Void
-    init(context: AccountContext, openBlockedUsers: @escaping () -> Void, openLastSeenPrivacy: @escaping () -> Void, openGroupsPrivacy: @escaping () -> Void, openVoiceCallPrivacy: @escaping () -> Void, openProfilePhotoPrivacy: @escaping () -> Void, openForwardPrivacy: @escaping () -> Void, openPhoneNumberPrivacy: @escaping() -> Void, openPasscode: @escaping () -> Void, openTwoStepVerification: @escaping (TwoStepVeriticationAccessConfiguration?) -> Void, openActiveSessions: @escaping ([RecentAccountSession]?) -> Void, openWebAuthorizations: @escaping() -> Void, setupAccountAutoremove: @escaping () -> Void, openProxySettings:@escaping() ->Void, togglePeerSuggestions:@escaping(Bool)->Void, clearCloudDrafts: @escaping() -> Void) {
+    let toggleSensitiveContent:(Bool)->Void
+    init(context: AccountContext, openBlockedUsers: @escaping () -> Void, openLastSeenPrivacy: @escaping () -> Void, openGroupsPrivacy: @escaping () -> Void, openVoiceCallPrivacy: @escaping () -> Void, openProfilePhotoPrivacy: @escaping () -> Void, openForwardPrivacy: @escaping () -> Void, openPhoneNumberPrivacy: @escaping() -> Void, openPasscode: @escaping () -> Void, openTwoStepVerification: @escaping (TwoStepVeriticationAccessConfiguration?) -> Void, openActiveSessions: @escaping ([RecentAccountSession]?) -> Void, openWebAuthorizations: @escaping() -> Void, setupAccountAutoremove: @escaping () -> Void, openProxySettings:@escaping() ->Void, togglePeerSuggestions:@escaping(Bool)->Void, clearCloudDrafts: @escaping() -> Void, toggleSensitiveContent: @escaping(Bool)->Void) {
         self.context = context
         self.openBlockedUsers = openBlockedUsers
         self.openLastSeenPrivacy = openLastSeenPrivacy
@@ -46,35 +73,38 @@ private final class PrivacyAndSecurityControllerArguments {
         self.openProfilePhotoPrivacy = openProfilePhotoPrivacy
         self.openForwardPrivacy = openForwardPrivacy
         self.openPhoneNumberPrivacy = openPhoneNumberPrivacy
+        self.toggleSensitiveContent = toggleSensitiveContent
     }
 }
 
 
 private enum PrivacyAndSecurityEntry: Comparable, Identifiable {
     case privacyHeader(sectionId:Int)
-    case blockedPeers(sectionId:Int, Int?)
-    case phoneNumberPrivacy(sectionId: Int, String)
-    case lastSeenPrivacy(sectionId: Int, String)
-    case groupPrivacy(sectionId: Int, String)
-    case profilePhotoPrivacy(sectionId: Int, String)
-    case forwardPrivacy(sectionId: Int, String)
-    case voiceCallPrivacy(sectionId: Int, String)
+    case blockedPeers(sectionId:Int, Int?, viewType: GeneralViewType)
+    case phoneNumberPrivacy(sectionId: Int, String, viewType: GeneralViewType)
+    case lastSeenPrivacy(sectionId: Int, String, viewType: GeneralViewType)
+    case groupPrivacy(sectionId: Int, String, viewType: GeneralViewType)
+    case profilePhotoPrivacy(sectionId: Int, String, viewType: GeneralViewType)
+    case forwardPrivacy(sectionId: Int, String, viewType: GeneralViewType)
+    case voiceCallPrivacy(sectionId: Int, String, viewType: GeneralViewType)
     case securityHeader(sectionId:Int)
-    case passcode(sectionId:Int, enabled: Bool)
-    case twoStepVerification(sectionId:Int, configuration: TwoStepVeriticationAccessConfiguration?)
-    case activeSessions(sectionId:Int, [RecentAccountSession]?)
+    case passcode(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
+    case twoStepVerification(sectionId:Int, configuration: TwoStepVeriticationAccessConfiguration?, viewType: GeneralViewType)
+    case activeSessions(sectionId:Int, [RecentAccountSession]?, viewType: GeneralViewType)
     case webAuthorizationsHeader(sectionId: Int)
-    case webAuthorizations(sectionId:Int)
+    case webAuthorizations(sectionId:Int, viewType: GeneralViewType)
     case accountHeader(sectionId:Int)
-    case accountTimeout(sectionId: Int, String)
+    case accountTimeout(sectionId: Int, String, viewType: GeneralViewType)
     case accountInfo(sectionId:Int)
     case proxyHeader(sectionId:Int)
-    case proxySettings(sectionId:Int, String)
-    case togglePeerSuggestions(sectionId: Int, enabled: Bool)
+    case proxySettings(sectionId:Int, String, viewType: GeneralViewType)
+    case togglePeerSuggestions(sectionId: Int, enabled: Bool, viewType: GeneralViewType)
     case togglePeerSuggestionsDesc(sectionId: Int)
-
+    case sensitiveContentHeader(sectionId: Int)
+    case sensitiveContentToggle(sectionId: Int, value: Bool?, viewType: GeneralViewType)
+    case sensitiveContentDesc(sectionId: Int)
     case clearCloudDraftsHeader(sectionId: Int)
-    case clearCloudDrafts(sectionId: Int)
+    case clearCloudDrafts(sectionId: Int, viewType: GeneralViewType)
 
     case section(sectionId:Int)
 
@@ -82,49 +112,55 @@ private enum PrivacyAndSecurityEntry: Comparable, Identifiable {
         switch self {
         case let .privacyHeader(sectionId):
             return sectionId
-        case let .blockedPeers(sectionId, _):
+        case let .blockedPeers(sectionId, _, _):
             return sectionId
-        case let .phoneNumberPrivacy(sectionId, _):
+        case let .phoneNumberPrivacy(sectionId, _, _):
             return sectionId
-        case let .lastSeenPrivacy(sectionId, _):
+        case let .lastSeenPrivacy(sectionId, _, _):
             return sectionId
-        case let .groupPrivacy(sectionId, _):
+        case let .groupPrivacy(sectionId, _, _):
             return sectionId
-        case let .profilePhotoPrivacy(sectionId, _):
+        case let .profilePhotoPrivacy(sectionId, _, _):
             return sectionId
-        case let .forwardPrivacy(sectionId, _):
+        case let .forwardPrivacy(sectionId, _, _):
             return sectionId
-        case let .voiceCallPrivacy(sectionId, _):
+        case let .voiceCallPrivacy(sectionId, _, _):
             return sectionId
         case let .securityHeader(sectionId):
             return sectionId
-        case let .passcode(sectionId, _):
+        case let .passcode(sectionId, _, _):
             return sectionId
-        case let .twoStepVerification(sectionId, _):
+        case let .twoStepVerification(sectionId, _, _):
             return sectionId
-        case let .activeSessions(sectionId, _):
+        case let .activeSessions(sectionId, _, _):
             return sectionId
         case let .webAuthorizationsHeader(sectionId):
             return sectionId
-        case let .webAuthorizations(sectionId):
+        case let .webAuthorizations(sectionId, _):
             return sectionId
         case let .accountHeader(sectionId):
             return sectionId
-        case let .accountTimeout(sectionId, _):
+        case let .accountTimeout(sectionId, _, _):
             return sectionId
         case let .accountInfo(sectionId):
             return sectionId
-        case let .proxySettings(sectionId, _):
-            return sectionId
-        case let .togglePeerSuggestions(sectionId, _):
+        case let .togglePeerSuggestions(sectionId, _, _):
             return sectionId
         case let .togglePeerSuggestionsDesc(sectionId):
             return sectionId
         case let .clearCloudDraftsHeader(sectionId):
             return sectionId
-        case let .clearCloudDrafts(sectionId):
+        case let .clearCloudDrafts(sectionId, _):
             return sectionId
         case let .proxyHeader(sectionId):
+            return sectionId
+        case let .proxySettings(sectionId, _, _):
+            return sectionId
+        case let .sensitiveContentHeader(sectionId):
+            return sectionId
+        case let .sensitiveContentToggle(sectionId, _, _):
+            return sectionId
+        case let .sensitiveContentDesc(sectionId):
             return sectionId
         case let .section(sectionId):
             return sectionId
@@ -179,6 +215,12 @@ private enum PrivacyAndSecurityEntry: Comparable, Identifiable {
             return 21
         case .clearCloudDrafts:
             return 22
+        case .sensitiveContentHeader:
+            return 23
+        case .sensitiveContentToggle:
+            return 24
+        case .sensitiveContentDesc:
+            return 25
         case let .section(sectionId):
             return (sectionId + 1) * 1000 - sectionId
         }
@@ -195,159 +237,55 @@ private enum PrivacyAndSecurityEntry: Comparable, Identifiable {
 
     }
 
-//    static func ==(lhs: PrivacyAndSecurityEntry, rhs: PrivacyAndSecurityEntry) -> Bool {
-//        switch lhs {
-//        case .privacyHeader, .securityHeader, .webAuthorizationsHeader, .webAuthorizations, .accountHeader, .accountInfo, .proxyHeader, .section:
-//            return lhs.stableId == rhs.stableId && lhs.sectionId == rhs.sectionId
-//        case let .passcode(sectionId, enabled):
-//            if case .passcode(sectionId, enabled) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .lastSeenPrivacy(sectionId, text):
-//            if case .lastSeenPrivacy(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .twoStepVerification(sectionId, configuration):
-//            if case .twoStepVerification(sectionId, configuration) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .activeSessions(sectionId, sessions):
-//            if case .activeSessions(sectionId, sessions) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .blockedPeers(sectionId, count):
-//            if case .blockedPeers(sectionId, count) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .phoneNumberPrivacy(sectionId, text):
-//            if case .phoneNumberPrivacy(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .groupPrivacy(sectionId, text):
-//            if case .groupPrivacy(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .proxySettings(sectionId, text):
-//            if case .proxySettings(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .togglePeerSuggestions(sectionId, enabled):
-//            if case .togglePeerSuggestions(sectionId, enabled) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .togglePeerSuggestionsDesc(sectionId):
-//            if case .togglePeerSuggestionsDesc(sectionId) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .clearCloudDraftsHeader(sectionId):
-//            if case .clearCloudDraftsHeader(sectionId) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .clearCloudDrafts(sectionId):
-//            if case .clearCloudDrafts(sectionId) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .profilePhotoPrivacy(sectionId, text):
-//            if case .profilePhotoPrivacy(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .forwardPrivacy(sectionId, text):
-//            if case .forwardPrivacy(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .voiceCallPrivacy(sectionId, text):
-//            if case .voiceCallPrivacy(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        case let .accountTimeout(sectionId, text):
-//            if case .accountTimeout(sectionId, text) = rhs {
-//                return true
-//            } else {
-//                return false
-//            }
-//        }
-//    }
-
     static func <(lhs: PrivacyAndSecurityEntry, rhs: PrivacyAndSecurityEntry) -> Bool {
         return lhs.stableIndex < rhs.stableIndex
     }
     func item(_ arguments: PrivacyAndSecurityControllerArguments, initialSize: NSSize) -> TableRowItem {
         switch self {
         case .privacyHeader:
-
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsPrivacyHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case let .blockedPeers(_, count):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsPrivacyHeader, viewType: .textTopItem)
+        case let .blockedPeers(_, count, viewType):
             let text: String
             if let count = count, count > 0 {
                 text = L10n.privacyAndSecurityBlockedUsers("\(count)")
             } else {
                 text = ""
             }
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsBlockedUsers, icon: theme.icons.privacySettings_blocked, type: .nextContext(text), action: {
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsBlockedUsers, icon: theme.icons.privacySettings_blocked, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openBlockedUsers()
             })
-        case let .phoneNumberPrivacy(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsPhoneNumber, type: .context(text), action: {
+        case let .phoneNumberPrivacy(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsPhoneNumber, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openPhoneNumberPrivacy()
             })
-        case let .lastSeenPrivacy(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsLastSeen, type: .context(text), action: {
+        case let .lastSeenPrivacy(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsLastSeen, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openLastSeenPrivacy()
             })
-        case let .groupPrivacy(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsGroups, type: .context(text), action: {
+        case let .groupPrivacy(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsGroups, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openGroupsPrivacy()
             })
-        case let .profilePhotoPrivacy(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsProfilePhoto, type: .context(text), action: {
+        case let .profilePhotoPrivacy(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsProfilePhoto, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openProfilePhotoPrivacy()
             })
-        case let .forwardPrivacy(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsForwards, type: .context(text), action: {
+        case let .forwardPrivacy(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsForwards, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openForwardPrivacy()
             })
-        case let .voiceCallPrivacy(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsVoiceCalls, type: .context(text), action: {
+        case let .voiceCallPrivacy(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsVoiceCalls, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openVoiceCallPrivacy()
             })
         case .securityHeader:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsSecurityHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case let .passcode(_, enabled):
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsSecurityHeader, viewType: .textTopItem)
+        case let .passcode(_, enabled, viewType):
             let desc = enabled ? L10n.privacyAndSecurityItemOn : L10n.privacyAndSecurityItemOff
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsPasscode, icon: theme.icons.privacySettings_passcode, type: .nextContext(desc), action: {
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsPasscode, icon: theme.icons.privacySettings_passcode, type: .nextContext(desc), viewType: viewType, action: {
                 arguments.openPasscode()
             })
-        case let .twoStepVerification(_, configuration):
+        case let .twoStepVerification(_, configuration, viewType):
             let desc: String 
             if let configuration = configuration {
                 switch configuration {
@@ -359,35 +297,35 @@ private enum PrivacyAndSecurityEntry: Comparable, Identifiable {
             } else {
                 desc = ""
             }
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsTwoStepVerification, icon: theme.icons.privacySettings_twoStep, type: .nextContext(desc), action: {
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsTwoStepVerification, icon: theme.icons.privacySettings_twoStep, type: .nextContext(desc), viewType: viewType, action: {
                 arguments.openTwoStepVerification(configuration)
             })
-        case let .activeSessions(_, sessions):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsActiveSessions, icon: theme.icons.privacySettings_activeSessions, type: .nextContext(sessions != nil ? "\(sessions!.count)" : ""), action: {
+        case let .activeSessions(_, sessions, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsActiveSessions, icon: theme.icons.privacySettings_activeSessions, type: .nextContext(sessions != nil ? "\(sessions!.count)" : ""), viewType: viewType, action: {
                 arguments.openActiveSessions(sessions)
             })
         case .webAuthorizationsHeader:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacyAndSecurityWebAuthorizationHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case .webAuthorizations:
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.telegramWebSessionsController, action: {
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacyAndSecurityWebAuthorizationHeader, viewType: .textTopItem)
+        case let .webAuthorizations(_, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.telegramWebSessionsController, viewType: viewType, action: {
                 arguments.openWebAuthorizations()
             })
         case .accountHeader:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsDeleteAccountHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case let .accountTimeout(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsDeleteAccount, type: .context(text), action: {
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsDeleteAccountHeader, viewType: .textTopItem)
+        case let .accountTimeout(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsDeleteAccount, type: .context(text), viewType: viewType, action: {
                 arguments.setupAccountAutoremove()
             })
         case .accountInfo:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsDeleteAccountDescription)
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsDeleteAccountDescription, viewType: .textBottomItem)
         case .proxyHeader:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsProxyHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case let .proxySettings(_, text):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsUseProxy, type: .context(text), action: {
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacySettingsProxyHeader, viewType: .textTopItem)
+        case let .proxySettings(_, text, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacySettingsUseProxy, type: .nextContext(text), viewType: viewType, action: {
                 arguments.openProxySettings()
             })
-        case let .togglePeerSuggestions(_, enabled):
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.suggestFrequentContacts, type: .switchable(enabled), action: {
+        case let .togglePeerSuggestions(_, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.suggestFrequentContacts, type: .switchable(enabled), viewType: viewType, action: {
                 if enabled {
                     confirm(for: mainWindow, information: L10n.suggestFrequentContactsAlert, successHandler: { _ in
                         arguments.togglePeerSuggestions(!enabled)
@@ -397,15 +335,25 @@ private enum PrivacyAndSecurityEntry: Comparable, Identifiable {
                 }
             }, autoswitch: false)
         case .togglePeerSuggestionsDesc:
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.suggestFrequentContactsDesc, drawCustomSeparator: false, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.suggestFrequentContactsDesc, viewType: .textBottomItem)
         case .clearCloudDraftsHeader:
-             return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacyAndSecurityClearCloudDraftsHeader, drawCustomSeparator: true, inset: NSEdgeInsets(left: 30.0, right: 30.0, top:2, bottom:6))
-        case .clearCloudDrafts:
-            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacyAndSecurityClearCloudDrafts, type: .none, action: {
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacyAndSecurityClearCloudDraftsHeader, viewType: .textTopItem)
+        case let .clearCloudDrafts(_, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacyAndSecurityClearCloudDrafts, type: .none, viewType: viewType, action: {
                 arguments.clearCloudDrafts()
             })
-        case .section :
-            return GeneralRowItem(initialSize, height:20, stableId: stableId)
+        case .sensitiveContentHeader:
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacyAndSecuritySensitiveHeader, viewType: .textTopItem)
+        case let .sensitiveContentToggle(_, enabled, viewType):
+            return GeneralInteractedRowItem(initialSize, stableId: stableId, name: L10n.privacyAndSecuritySensitiveText, type: enabled != nil ? .switchable(enabled!) : .loading, viewType: viewType, action: {
+                if let enabled = enabled {
+                    arguments.toggleSensitiveContent(!enabled)
+                }
+            }, autoswitch: true)
+        case .sensitiveContentDesc:
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: L10n.privacyAndSecuritySensitiveDesc, viewType: .textBottomItem)
+        case .section:
+            return GeneralRowItem(initialSize, height: 30, stableId: stableId, viewType: .separator)
         }
     }
 }
@@ -479,15 +427,15 @@ fileprivate func prepareTransition(left:[AppearanceWrapperEntry<PrivacyAndSecuri
     return TableUpdateTransition(deleted: removed, inserted: inserted, updated: updated, animated: true)
 }
 
-private func privacyAndSecurityControllerEntries(state: PrivacyAndSecurityControllerState, privacySettings: AccountPrivacySettings?, webSessions: ([WebAuthorization], [PeerId : Peer])?, blockedState: BlockedPeersContextState, proxy: ProxySettings, recentPeers: RecentPeers, configuration: TwoStepVeriticationAccessConfiguration?, activeSessions: [RecentAccountSession]?, passcodeData: PostboxAccessChallengeData) -> [PrivacyAndSecurityEntry] {
+private func privacyAndSecurityControllerEntries(state: PrivacyAndSecurityControllerState, contentConfiguration: ContentSettingsConfiguration?, privacySettings: AccountPrivacySettings?, webSessions: ([WebAuthorization], [PeerId : Peer])?, blockedState: BlockedPeersContextState, proxy: ProxySettings, recentPeers: RecentPeers, configuration: TwoStepVeriticationAccessConfiguration?, activeSessions: [RecentAccountSession]?, passcodeData: PostboxAccessChallengeData) -> [PrivacyAndSecurityEntry] {
     var entries: [PrivacyAndSecurityEntry] = []
 
     var sectionId:Int = 1
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
 
-    entries.append(.blockedPeers(sectionId: sectionId, blockedState.totalCount))
-    entries.append(.activeSessions(sectionId: sectionId, activeSessions))
+    entries.append(.blockedPeers(sectionId: sectionId, blockedState.totalCount, viewType: .firstItem))
+    entries.append(.activeSessions(sectionId: sectionId, activeSessions, viewType: .innerItem))
     
     let hasPasscode: Bool
     switch passcodeData {
@@ -497,44 +445,28 @@ private func privacyAndSecurityControllerEntries(state: PrivacyAndSecurityContro
         hasPasscode = true
     }
     
-    entries.append(.passcode(sectionId: sectionId, enabled: hasPasscode))
-    entries.append(.twoStepVerification(sectionId: sectionId, configuration: configuration))
+    entries.append(.passcode(sectionId: sectionId, enabled: hasPasscode, viewType: .innerItem))
+    entries.append(.twoStepVerification(sectionId: sectionId, configuration: configuration, viewType: .lastItem))
 
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
     
     entries.append(.privacyHeader(sectionId: sectionId))
     if let privacySettings = privacySettings {
-        entries.append(.phoneNumberPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.phoneNumber)))
-        entries.append(.lastSeenPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.presence)))
-        entries.append(.groupPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.groupInvitations)))
-        entries.append(.voiceCallPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.voiceCalls)))
-        entries.append(.profilePhotoPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.profilePhoto)))
-        entries.append(.forwardPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.forwards)))
+        entries.append(.phoneNumberPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.phoneNumber), viewType: .firstItem))
+        entries.append(.lastSeenPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.presence), viewType: .innerItem))
+        entries.append(.groupPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.groupInvitations), viewType: .innerItem))
+        entries.append(.voiceCallPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.voiceCalls), viewType: .innerItem))
+        entries.append(.profilePhotoPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.profilePhoto), viewType: .innerItem))
+        entries.append(.forwardPrivacy(sectionId: sectionId, stringForSelectiveSettings(settings: privacySettings.forwards), viewType: .lastItem))
     } else {
-        entries.append(.lastSeenPrivacy(sectionId: sectionId, ""))
-        entries.append(.groupPrivacy(sectionId: sectionId, ""))
-        entries.append(.voiceCallPrivacy(sectionId: sectionId, ""))
+        entries.append(.phoneNumberPrivacy(sectionId: sectionId, "", viewType: .firstItem))
+        entries.append(.lastSeenPrivacy(sectionId: sectionId, "", viewType: .innerItem))
+        entries.append(.groupPrivacy(sectionId: sectionId, "", viewType: .innerItem))
+        entries.append(.voiceCallPrivacy(sectionId: sectionId, "", viewType: .innerItem))
+        entries.append(.profilePhotoPrivacy(sectionId: sectionId, "", viewType: .innerItem))
+        entries.append(.forwardPrivacy(sectionId: sectionId, "", viewType: .lastItem))
     }
-
-
-    entries.append(.section(sectionId: sectionId))
-    sectionId += 1
-
-
-    entries.append(.proxyHeader(sectionId: sectionId))
-    let text: String
-    if let active = proxy.activeServer, proxy.enabled {
-        switch active.connection {
-        case .socks5:
-            text = L10n.proxySettingsSocks5
-        case .mtp:
-            text = L10n.proxySettingsMTP
-        }
-    } else {
-        text = L10n.proxySettingsDisabled
-    }
-    entries.append(.proxySettings(sectionId: sectionId, text))
 
 
     entries.append(.section(sectionId: sectionId))
@@ -550,17 +482,28 @@ private func privacyAndSecurityControllerEntries(state: PrivacyAndSecurityContro
         } else {
             value = privacySettings.accountRemovalTimeout
         }
-        entries.append(.accountTimeout(sectionId: sectionId, timeIntervalString(Int(value))))
+        entries.append(.accountTimeout(sectionId: sectionId, timeIntervalString(Int(value)), viewType: .singleItem))
 
     } else {
-        entries.append(.accountTimeout(sectionId: sectionId, ""))
+        entries.append(.accountTimeout(sectionId: sectionId, "", viewType: .singleItem))
     }
     entries.append(.accountInfo(sectionId: sectionId))
 
 
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
-
+    
+    if let contentConfiguration = contentConfiguration, contentConfiguration.canAdjustSensitiveContent {
+        #if !APP_STORE
+        entries.append(.sensitiveContentHeader(sectionId: sectionId))
+        entries.append(.sensitiveContentToggle(sectionId: sectionId, value: contentConfiguration.sensitiveContentEnabled, viewType: .singleItem))
+        entries.append(.sensitiveContentDesc(sectionId: sectionId))
+        
+        entries.append(.section(sectionId: sectionId))
+        sectionId += 1
+        #endif
+    }
+    
 
     let enabled: Bool
     switch recentPeers {
@@ -570,21 +513,21 @@ private func privacyAndSecurityControllerEntries(state: PrivacyAndSecurityContro
         enabled = true
     }
 
-    entries.append(.togglePeerSuggestions(sectionId: sectionId, enabled: enabled))
+    entries.append(.togglePeerSuggestions(sectionId: sectionId, enabled: enabled, viewType: .singleItem))
     entries.append(.togglePeerSuggestionsDesc(sectionId: sectionId))
 
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
 
     entries.append(.clearCloudDraftsHeader(sectionId: sectionId))
-    entries.append(.clearCloudDrafts(sectionId: sectionId))
+    entries.append(.clearCloudDrafts(sectionId: sectionId, viewType: .singleItem))
 
     entries.append(.section(sectionId: sectionId))
     sectionId += 1
 
     if let webSessions = webSessions, !webSessions.0.isEmpty {
         entries.append(.webAuthorizationsHeader(sectionId: sectionId))
-        entries.append(.webAuthorizations(sectionId: sectionId))
+        entries.append(.webAuthorizations(sectionId: sectionId, viewType: .singleItem))
     }
 
 
@@ -600,10 +543,6 @@ private func privacyAndSecurityControllerEntries(state: PrivacyAndSecurityContro
 
 class PrivacyAndSecurityViewController: TableViewController {
     private let privacySettingsPromise = Promise<(AccountPrivacySettings?, ([WebAuthorization], [PeerId : Peer])?)>()
-
-//    override var removeAfterDisapper: Bool {
-//        return true
-//    }
 
 
     override func viewWillAppear(_ animated: Bool) {
@@ -807,7 +746,7 @@ class PrivacyAndSecurityViewController: TableViewController {
             }
         }, openActiveSessions: { [weak self] sessions in
             if let context = self?.context {
-                self?.navigationController?.push(RecentSessionsController(context, activeSessions: sessions))
+                self?.navigationController?.push(RecentSessionsController(context))
             }
         }, openWebAuthorizations: {
 
@@ -884,7 +823,7 @@ class PrivacyAndSecurityViewController: TableViewController {
                             timeoutAction(timeoutValues[3])
                         }))
 
-                        if let index = strongSelf.genericView.index(hash: PrivacyAndSecurityEntry.accountTimeout(sectionId: 0, "").stableId) {
+                        if let index = strongSelf.genericView.index(hash: PrivacyAndSecurityEntry.accountTimeout(sectionId: 0, "", viewType: .singleItem).stableId) {
                             if let view = (strongSelf.genericView.viewNecessary(at: index) as? GeneralInteractedRowView)?.textView {
                                 showPopover(for: view, with: SPopoverViewController(items: items))
                             }
@@ -915,29 +854,46 @@ class PrivacyAndSecurityViewController: TableViewController {
             _ = (updateRecentPeersEnabled(postbox: context.account.postbox, network: context.account.network, enabled: enabled) |> then(enabled ? managedUpdatedRecentPeers(accountPeerId: context.account.peerId, postbox: context.account.postbox, network: context.account.network) : Signal<Void, NoError>.complete())).start()
         }, clearCloudDrafts: {
             confirm(for: context.window, information: L10n.privacyAndSecurityConfirmClearCloudDrafts, successHandler: { _ in
-                _ = showModalProgress(signal: clearCloudDraftsInteractively(postbox: context.account.postbox, network: context.account.network, accountPeerId: context.account.peerId), for: mainWindow).start()
+                _ = showModalProgress(signal: clearCloudDraftsInteractively(postbox: context.account.postbox, network: context.account.network, accountPeerId: context.account.peerId), for: context.window).start()
             })
+        }, toggleSensitiveContent: { value in
+            _ = updateRemoteContentSettingsConfiguration(postbox: context.account.postbox, network: context.account.network, sensitiveContentEnabled: value).start()
         })
 
 
         let previous:Atomic<[AppearanceWrapperEntry<PrivacyAndSecurityEntry>]> = Atomic(value: [])
         let initialSize = self.atomicSize
 
+        let contentConfiguration: Signal<ContentSettingsConfiguration?, NoError> = .single(nil) |> then(contentSettingsConfiguration(network: context.account.network) |> map(Optional.init))
 
-        genericView.merge(with: combineLatest(queue: .mainQueue(), statePromise.get(), appearanceSignal, settings, privacySettingsPromise.get(), combineLatest(queue: .mainQueue(), recentPeers(account: context.account), twoStepAccessConfiguration.get(), activeSessions.get(), context.sharedContext.accountManager.accessChallengeData()), context.blockedPeersContext.state)
-            |> map { state, appearance, proxy, values, additional, blockedState -> TableUpdateTransition in
-                let entries = privacyAndSecurityControllerEntries(state: state, privacySettings: values.0, webSessions: values.1, blockedState: blockedState, proxy: proxy, recentPeers: additional.0, configuration: additional.1, activeSessions: additional.2, passcodeData: additional.3.data).map{AppearanceWrapperEntry(entry: $0, appearance: appearance)}
-                return prepareTransition(left: previous.swap(entries), right: entries, initialSize: initialSize.modify {$0}, arguments: arguments)
-            } |> beforeNext { [weak self] _ in
-                self?.readyOnce()
-            } |> afterDisposed {
-                actionsDisposable.dispose()
-            })
-
+        
+        let signal = combineLatest(queue: .mainQueue(), statePromise.get(), contentConfiguration, appearanceSignal, settings, privacySettingsPromise.get(), combineLatest(queue: .mainQueue(), recentPeers(account: context.account), twoStepAccessConfiguration.get(), activeSessions.get(), context.sharedContext.accountManager.accessChallengeData()), context.blockedPeersContext.state)
+        |> map { state, contentConfiguration, appearance, proxy, values, additional, blockedState -> TableUpdateTransition in
+            let entries = privacyAndSecurityControllerEntries(state: state, contentConfiguration: contentConfiguration, privacySettings: values.0, webSessions: values.1, blockedState: blockedState, proxy: proxy, recentPeers: additional.0, configuration: additional.1, activeSessions: additional.2, passcodeData: additional.3.data).map{AppearanceWrapperEntry(entry: $0, appearance: appearance)}
+            return prepareTransition(left: previous.swap(entries), right: entries, initialSize: initialSize.modify {$0}, arguments: arguments)
+        } |> afterDisposed {
+            actionsDisposable.dispose()
+        } |> deliverOnMainQueue
+        
+        disposable.set(signal.start(next: { [weak self] transition in
+            self?.genericView.merge(with: transition)
+            self?.readyOnce()
+            if let focusOnItemTag = self?.focusOnItemTag {
+                self?.genericView.scroll(to: .center(id: focusOnItemTag.stableId, innerId: nil, animated: true, focus: .init(focus: true), inset: 0), inset: NSEdgeInsets())
+                self?.focusOnItemTag = nil
+            }
+        }))
+        
     }
     
-
-    init(_ context: AccountContext, initialSettings: (AccountPrivacySettings?, ([WebAuthorization], [PeerId : Peer])?)) {
+    deinit {
+        disposable.dispose()
+    }
+    
+    private var focusOnItemTag: PrivacyAndSecurityEntryTag?
+    private let disposable = MetaDisposable()
+    init(_ context: AccountContext, initialSettings: (AccountPrivacySettings?, ([WebAuthorization], [PeerId : Peer])?), focusOnItemTag: PrivacyAndSecurityEntryTag? = nil) {
+        self.focusOnItemTag = focusOnItemTag
         super.init(context)
         self.privacySettingsPromise.set(.single(initialSettings))
     }

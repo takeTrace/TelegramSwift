@@ -8,7 +8,7 @@
 
 import Cocoa
 import TGUIKit
-import SwiftSignalKitMac
+import SwiftSignalKit
 
 enum SVideoControlsStyle : Equatable {
     case regular(pip: Bool, fullScreen: Bool, hideRewind: Bool)
@@ -300,7 +300,7 @@ private final class SVideoControlsView : Control {
         
         addSubview(volumeContainer)
         
-        backgroundView.material = .ultraDark
+        backgroundView.material = .dark
         backgroundView.blendingMode = .withinWindow
         
         playOrPause.autohighlight = false
@@ -493,6 +493,11 @@ class SVideoView: NSView {
         bufferingIndicator.center()
         bufferingIndicator.progressColor = .white
         backgroundView.frame = bounds
+        
+    }
+    
+    override var mouseDownCanMoveWindow: Bool {
+        return true
     }
     
     func hideControls(_ hide: Bool, animated: Bool) {
@@ -565,7 +570,7 @@ class SVideoView: NSView {
         addSubview(mediaPlayer)
         addSubview(bufferingIndicator)
         addSubview(controls)
-        
+        bufferingIndicator.innerInset = 8.0
         backgroundView.wantsLayer = true
         backgroundView.background = .black
         

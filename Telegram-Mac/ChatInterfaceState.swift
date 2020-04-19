@@ -9,9 +9,10 @@
 
 import Cocoa
 
-import PostboxMac
-import SwiftSignalKitMac
-import TelegramCoreMac
+import Postbox
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
 
 struct ChatTextFontAttributes: OptionSet {
     var rawValue: Int32 = 0
@@ -24,34 +25,25 @@ struct ChatTextFontAttributes: OptionSet {
 
 
 
-struct ChatInterfaceSelectionState: PostboxCoding, Equatable {
+struct ChatInterfaceSelectionState: Equatable {
     let selectedIds: Set<MessageId>
+    let lastSelectedId: MessageId?
     
-    static func ==(lhs: ChatInterfaceSelectionState, rhs: ChatInterfaceSelectionState) -> Bool {
-        return lhs.selectedIds == rhs.selectedIds
-    }
-    
-    init(selectedIds: Set<MessageId>) {
+    init(selectedIds: Set<MessageId>, lastSelectedId: MessageId?) {
         self.selectedIds = selectedIds
+        self.lastSelectedId = lastSelectedId
     }
-    
-    init(decoder: PostboxDecoder) {
-        if let data = decoder.decodeBytesForKeyNoCopy("i") {
-            self.selectedIds = Set(MessageId.decodeArrayFromBuffer(data))
-        } else {
-            self.selectedIds = Set()
-        }
+    func withUpdatedSelectedIds(_ ids: Set<MessageId>) -> ChatInterfaceSelectionState {
+        return ChatInterfaceSelectionState(selectedIds: ids, lastSelectedId: self.lastSelectedId)
     }
-    
-    func encode(_ encoder: PostboxEncoder) {
-        let buffer = WriteBuffer()
-        MessageId.encodeArrayToBuffer(Array(selectedIds), buffer: buffer)
-        encoder.encodeBytes(buffer, forKey: "i")
+    func withUpdatedLastSelected(_ lastSelectedId: MessageId?) -> ChatInterfaceSelectionState {
+        return ChatInterfaceSelectionState(selectedIds: self.selectedIds, lastSelectedId: lastSelectedId)
     }
 }
 
 enum ChatTextInputAttribute : Equatable, PostboxCoding {
     case bold(Range<Int>)
+    case strikethrough(Range<Int>)
     case italic(Range<Int>)
     case pre(Range<Int>)
     case code(Range<Int>)
@@ -74,6 +66,8 @@ enum ChatTextInputAttribute : Equatable, PostboxCoding {
             self = .code(range)
         case 5:
             self = .url(range, decoder.decodeStringForKey("url", orElse: ""))
+        case 6:
+            self = .strikethrough(range)
         default:
             fatalError("input attribute not supported")
         }
@@ -91,6 +85,8 @@ enum ChatTextInputAttribute : Equatable, PostboxCoding {
             encoder.encodeInt32(2, forKey: "_rawValue")
         case .code:
             encoder.encodeInt32(4, forKey: "_rawValue")
+        case .strikethrough:
+            encoder.encodeInt32(6, forKey: "_rawValue")
         case let .uid(_, uid):
             encoder.encodeInt32(3, forKey: "_rawValue")
             encoder.encodeInt32(uid, forKey: "uid")
@@ -107,6 +103,8 @@ extension ChatTextInputAttribute {
         switch self {
         case let .bold(range):
             return (NSAttributedString.Key.font.rawValue, NSFont.bold(.text), NSMakeRange(range.lowerBound, range.upperBound - range.lowerBound))
+        case let .strikethrough(range):
+            return (NSAttributedString.Key.font.rawValue, NSFont.normal(.text), NSMakeRange(range.lowerBound, range.upperBound - range.lowerBound))
         case let .italic(range):
             return (NSAttributedString.Key.font.rawValue, NSFontManager.shared.convert(.normal(.text), toHaveTrait: .italicFontMask), NSMakeRange(range.lowerBound, range.upperBound - range.lowerBound))
         case let .pre(range), let .code(range):
@@ -122,7 +120,7 @@ extension ChatTextInputAttribute {
     
     var range:Range<Int> {
         switch self {
-        case let .bold(range), let .italic(range), let .pre(range), let .code(range):
+        case let .bold(range), let .italic(range), let .pre(range), let .code(range), let .strikethrough(range):
             return range
         case let .uid(range, _):
             return range
@@ -149,6 +147,8 @@ func chatTextAttributes(from entities:TextEntitiesMessageAttribute) -> [ChatText
             inputAttributes.append(.uid(entity.range, peerId.id))
         case let .TextUrl(url):
             inputAttributes.append(.url(entity.range, url))
+        case .Strikethrough:
+            inputAttributes.append(.strikethrough(entity.range))
         default:
             break
         }
@@ -160,45 +160,51 @@ func chatTextAttributes(from attributed:NSAttributedString) -> [ChatTextInputAtt
     
     var inputAttributes:[ChatTextInputAttribute] = []
     
-    attributed.enumerateAttribute(NSAttributedString.Key.font, in: NSMakeRange(0, attributed.length), options: .init(rawValue: 0)) { font, range, _ in
-        if let font = font as? NSFont {
-            let descriptor = font.fontDescriptor
-            let symTraits = descriptor.symbolicTraits
-            let traitSet = NSFontTraitMask(rawValue: UInt(symTraits.rawValue))
-            let isBold = traitSet.contains(.boldFontMask)
-            let isItalic = traitSet.contains(.italicFontMask)
-            let isMonospace = font.fontName == "Menlo-Regular"
-            
-            if isItalic {
-                inputAttributes.append(.italic(range.location ..< range.location + range.length))
-            }
-            if isBold {
-                inputAttributes.append(.bold(range.location ..< range.location + range.length))
-            }
-            if isMonospace {
-                inputAttributes.append(.code(range.location ..< range.location + range.length))
+    
+    attributed.enumerateAttributes(in: attributed.range, options: []) { (keys, range, _) in
+        for (_, value) in keys {
+            if let font = value as? NSFont {
+                let descriptor = font.fontDescriptor
+                let symTraits = descriptor.symbolicTraits
+                let traitSet = NSFontTraitMask(rawValue: UInt(symTraits.rawValue))
+                let isBold = traitSet.contains(.boldFontMask)
+                let isItalic = traitSet.contains(.italicFontMask)
+                let isMonospace = font.fontName == "Menlo-Regular"
+                
+                if isItalic {
+                    inputAttributes.append(.italic(range.location ..< range.location + range.length))
+                }
+                if isBold {
+                    inputAttributes.append(.bold(range.location ..< range.location + range.length))
+                }
+                if isMonospace {
+                    inputAttributes.append(.code(range.location ..< range.location + range.length))
+                }
+            } else if let tag = value as? TGInputTextTag {
+                if let uid = tag.attachment as? NSNumber {
+                    inputAttributes.append(.uid(range.location ..< range.location + range.length, uid.int32Value))
+                } else if let url = tag.attachment as? String {
+                    inputAttributes.append(.url(range.location ..< range.location + range.length, url))
+                }
             }
         }
     }
     
-    attributed.enumerateAttribute(NSAttributedString.Key(rawValue: TGCustomLinkAttributeName), in: NSMakeRange(0, attributed.length), options: .init(rawValue: 0)) { tag, range, _ in
-        if let tag = tag as? TGInputTextTag {
-            if let uid = tag.attachment as? NSNumber {
-                inputAttributes.append(.uid(range.location ..< range.location + range.length, uid.int32Value))
-            } else if let url = tag.attachment as? String {
-                inputAttributes.append(.url(range.location ..< range.location + range.length, url))
-            }
-        }
-    }
-    return inputAttributes
+
+    return Array(inputAttributes.prefix(100))
 }
 
 //x/m
-private let markdownRegexFormat = "(^|\\s|\\n)(````?)([\\s\\S]+?)(````?)([\\s\\n\\.,:?!;]|$)|(^|\\s)(`|\\*\\*|__)([^\\n]+?)\\7([\\s\\.,:?!;]|$)|@(\\d+)\\s*\\((.+?)\\)" //"(^|\\s)(````?)([\\s\\S]+?)(````?)([\\s\\n\\.,:?!;]|$)|(^|\\s)(`)([^\\n]+?)\\7([\\s\\.,:?!;]|$)"
+private let markdownRegexFormat = "(^|\\s|\\n)(````?)([\\s\\S]+?)(````?)([\\s\\n\\.,:?!;]|$)|(^|\\s)(`|\\*\\*|__|~~)([^\\n]+?)\\7([\\s\\.,:?!;]|$)|@(\\d+)\\s*\\((.+?)\\)"
+
 
 private let markdownRegex = try? NSRegularExpression(pattern: markdownRegexFormat, options: [.caseInsensitive, .anchorsMatchLines])
 
-struct ChatTextInputState: PostboxCoding, Equatable {
+final class ChatTextInputState: PostboxCoding, Equatable {
+    static func == (lhs: ChatTextInputState, rhs: ChatTextInputState) -> Bool {
+        return lhs.selectionRange == rhs.selectionRange && lhs.attributes == rhs.attributes && lhs.inputText == rhs.inputText 
+    }
+    
     let inputText: String
     let attributes:[ChatTextInputAttribute]
     let selectionRange: Range<Int>
@@ -238,6 +244,8 @@ struct ChatTextInputState: PostboxCoding, Equatable {
         let string = NSMutableAttributedString()
         _ = string.append(string: inputText, color: theme.colors.text, font: .normal(theme.fontSize), coreText: false)
         
+        
+        string.fixEmojiesFont(theme.fontSize)
         
         var fontAttributes: [NSRange: ChatTextFontAttributes] = [:]
         
@@ -296,6 +304,8 @@ struct ChatTextInputState: PostboxCoding, Equatable {
         let string = NSMutableAttributedString()
         _ = string.append(string: inputText, color: theme.colors.text, font: .normal(theme.fontSize), coreText: false)
         var pres:[Range<Int>] = []
+        var strikethrough:[Range<Int>] = []
+
         for attribute in attributes {
             let attr = attribute.attribute
             
@@ -306,6 +316,8 @@ struct ChatTextInputState: PostboxCoding, Equatable {
                 } else {
                     string.addAttribute(NSAttributedString.Key(rawValue: attr.0), value: attr.1, range: attr.2)
                 }
+            case let .strikethrough(range):
+                strikethrough.append(range)
             default:
                 string.addAttribute(NSAttributedString.Key(rawValue: attr.0), value: attr.1, range: attr.2)
             }
@@ -317,6 +329,13 @@ struct ChatTextInputState: PostboxCoding, Equatable {
                 string.insert(.initialize(string: symbols, color: theme.colors.text, font: .normal(theme.fontSize), coreText: false), at: pre.lowerBound + offset)
                 offset += symbols.count
                 string.insert(.initialize(string: symbols, color: theme.colors.text, font: .normal(theme.fontSize), coreText: false), at: pre.upperBound + offset)
+                offset += symbols.count
+            }
+            for strikethrough in strikethrough.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+                let symbols = "~~"
+                string.insert(.initialize(string: symbols, color: theme.colors.text, font: .normal(theme.fontSize), coreText: false), at: strikethrough.lowerBound + offset)
+                offset += symbols.count
+                string.insert(.initialize(string: symbols, color: theme.colors.text, font: .normal(theme.fontSize), coreText: false), at: strikethrough.upperBound + offset)
                 offset += symbols.count
             }
         }
@@ -374,6 +393,9 @@ struct ChatTextInputState: PostboxCoding, Equatable {
                     case "**":
                         offsetRanges.append((NSMakeRange(matchIndex + match.range(at: 6).length, text.length), 4))
                         attributes.append(.bold(matchIndex + match.range(at: 6).length ..< matchIndex + match.range(at: 6).length + text.length))
+                    case "~~":
+                        offsetRanges.append((NSMakeRange(matchIndex + match.range(at: 6).length, text.length), 4))
+                        attributes.append(.strikethrough(matchIndex + match.range(at: 6).length ..< matchIndex + match.range(at: 6).length + text.length))
                     case "__":
                         offsetRanges.append((NSMakeRange(matchIndex + match.range(at: 6).length, text.length), 4))
                         attributes.append(.italic(matchIndex + match.range(at: 6).length ..< matchIndex + match.range(at: 6).length + text.length))
@@ -396,13 +418,13 @@ struct ChatTextInputState: PostboxCoding, Equatable {
         
         
         for attr in localAttributes {
-            var newRange = NSMakeRange(attr.range.lowerBound - range.location, (attr.range.upperBound - attr.range.lowerBound) - range.location) //Range<Int>(attr.range.lowerBound - range.location ..< attr.range.upperBound - range.location)
+            var newRange = NSMakeRange(attr.range.lowerBound, (attr.range.upperBound - attr.range.lowerBound)) //Range<Int>(attr.range.lowerBound - range.location ..< attr.range.upperBound - range.location)
             for offsetRange in offsetRanges {
                 if offsetRange.0.max < newRange.location {
                     newRange.location -= offsetRange.1
                 }
             }
-            if newRange.lowerBound >= range.location && newRange.upperBound <= range.location + range.length {
+            //if newRange.lowerBound >= range.location && newRange.upperBound <= range.location + range.length {
                 switch attr {
                 case .bold:
                     attributes.append(.bold(newRange.min ..< newRange.max))
@@ -412,12 +434,14 @@ struct ChatTextInputState: PostboxCoding, Equatable {
                     attributes.append(.pre(newRange.min ..< newRange.max))
                 case .code:
                     attributes.append(.code(newRange.min ..< newRange.max))
+                case .strikethrough:
+                    attributes.append(.strikethrough(newRange.min ..< newRange.max))
                 case let .uid(_, uid):
                     attributes.append(.uid(newRange.min ..< newRange.max, uid))
                 case let .url(_, url):
                     attributes.append(.url(newRange.min ..< newRange.max, url))
                 }
-            }
+          //  }
         }
         
         return ChatTextInputState(inputText: appliedText, selectionRange: 0 ..< 0, attributes: attributes)
@@ -430,6 +454,8 @@ struct ChatTextInputState: PostboxCoding, Equatable {
             switch attribute {
             case let .bold(range):
                 entities.append(.init(range: range, type: .Bold))
+            case let .strikethrough(range):
+                entities.append(.init(range: range, type: .Strikethrough))
             case let .italic(range):
                 entities.append(.init(range: range, type: .Italic))
             case let .pre(range):
@@ -482,6 +508,11 @@ struct ChatInterfaceMessageActionsState: PostboxCoding, Equatable {
     init(closedButtonKeyboardMessageId: MessageId?, processedSetupReplyMessageId: MessageId?) {
         self.closedButtonKeyboardMessageId = closedButtonKeyboardMessageId
         self.processedSetupReplyMessageId = processedSetupReplyMessageId
+        
+        if processedSetupReplyMessageId?.id == 349 {
+            var bp:Int = 0
+            bp += 1
+        }
     }
     
     init(decoder: PostboxDecoder) {
@@ -493,6 +524,11 @@ struct ChatInterfaceMessageActionsState: PostboxCoding, Equatable {
         
         if let processedMessageIdPeerId = (decoder.decodeOptionalInt64ForKey("pb.p") as Int64?), let processedMessageIdNamespace = (decoder.decodeOptionalInt32ForKey("pb.n") as Int32?), let processedMessageIdId = (decoder.decodeOptionalInt32ForKey("pb.i") as Int32?) {
             self.processedSetupReplyMessageId = MessageId(peerId: PeerId(processedMessageIdPeerId), namespace: processedMessageIdNamespace, id: processedMessageIdId)
+            
+            if processedMessageIdId == 349 {
+                var bp:Int = 0
+                bp += 1
+            }
         } else {
             self.processedSetupReplyMessageId = nil
         }
@@ -520,9 +556,6 @@ struct ChatInterfaceMessageActionsState: PostboxCoding, Equatable {
         }
     }
     
-    static func ==(lhs: ChatInterfaceMessageActionsState, rhs: ChatInterfaceMessageActionsState) -> Bool {
-        return lhs.closedButtonKeyboardMessageId == rhs.closedButtonKeyboardMessageId && lhs.processedSetupReplyMessageId == rhs.processedSetupReplyMessageId
-    }
     
     func withUpdatedClosedButtonKeyboardMessageId(_ closedButtonKeyboardMessageId: MessageId?) -> ChatInterfaceMessageActionsState {
         return ChatInterfaceMessageActionsState(closedButtonKeyboardMessageId: closedButtonKeyboardMessageId, processedSetupReplyMessageId: self.processedSetupReplyMessageId)
@@ -662,6 +695,7 @@ final class ChatEditState : Equatable {
     static func ==(lhs:ChatEditState, rhs:ChatEditState) -> Bool {
         return lhs.message.id == rhs.message.id && lhs.inputState == rhs.inputState && lhs.loadingState == rhs.loadingState && lhs.editMedia == rhs.editMedia && lhs.editedData == rhs.editedData
     }
+    
 }
 
 

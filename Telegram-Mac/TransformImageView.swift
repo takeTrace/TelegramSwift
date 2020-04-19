@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 
 private let threadPool = ThreadPool(threadCount: 1, threadPriority: 0.1)
@@ -71,12 +72,20 @@ open class TransformImageView: NSView {
         disposable.set(nil)
     }
     
-    public func setSignal(signal: Signal<TransformImageResult, NoError>, clearInstantly: Bool = true) {
+    public func setSignal(signal: Signal<TransformImageResult, NoError>, clearInstantly: Bool = true, animate: Bool = false) {
         self.disposable.set((signal |> deliverOnMainQueue).start(next: { [weak self] result in
+            
+            let hasImage = self?.image != nil
+            
             if clearInstantly {
                 self?.image = result.image
             } else if let image = result.image {
                 self?.image = image
+            }
+            if !hasImage && animate {
+                self?.layer?.animateAlpha(from: 0, to: 1, duration: 0.2)
+            } else if animate {
+                self?.layer?.animateContents()
             }
             self?.isFullyLoaded = result.highQuality
         }))
@@ -101,9 +110,11 @@ open class TransformImageView: NSView {
         }
         
         let result = combine |> map { data, arguments -> TransformImageResult in
-            let context = data.execute(arguments, data.data)
-            let image = context?.generateImage()
-            return TransformImageResult(image, context?.isHighQuality ?? false)
+            autoreleasepool {
+                let context = data.execute(arguments, data.data)
+                let image = context?.generateImage()
+                return TransformImageResult(image, context?.isHighQuality ?? false)
+            }
         } |> deliverOnMainQueue
         
         self.disposable.set(result.start(next: { [weak self] result in

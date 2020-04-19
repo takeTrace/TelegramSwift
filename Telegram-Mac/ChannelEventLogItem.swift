@@ -8,8 +8,9 @@
 
 import Cocoa
 import TGUIKit
-import PostboxMac
-import TelegramCoreMac
+import Postbox
+import TelegramCore
+import SyncCore
 
 private struct ServiceEventLogMessagePanel {
     let header:TextViewLayout
@@ -91,7 +92,7 @@ private class ServiceEventLogMessagePanelView : View {
     }
     override func draw(_ layer: CALayer, in ctx: CGContext) {
         super.draw(layer, in: ctx)
-        ctx.setFillColor(theme.colors.blueFill.cgColor)
+        ctx.setFillColor(theme.colors.accent.cgColor)
         let radius:CGFloat = 1.0
         ctx.fill(NSMakeRect(0, radius, 2, layer.bounds.height - radius * 2))
         ctx.fillEllipse(in: CGRect(origin: CGPoint(), size: CGSize(width: radius + radius, height: radius + radius)))
@@ -522,7 +523,7 @@ class ServiceEventLogItem: TableRowItem {
                     
                     let size = NSMakeSize(70, 70)
                     imageArguments = TransformImageArguments(corners: ImageCorners(radius: size.width / 2), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
-                    image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: new, immediateThumbnailData: nil, reference: nil, partialReference: nil)
+                    image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 0), representations: new, immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
                 }
                 serviceInfo = ServiceTextInfo(text: text, firstLink: peerLink, secondLink: nil)
             case .participantLeave:

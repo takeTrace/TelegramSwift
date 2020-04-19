@@ -19,9 +19,10 @@ import TGUIKit
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 
@@ -108,7 +109,7 @@ private class PasscodeLockView : Control, NSTextFieldDelegate {
         super.layout()
         
         nameView.center()
-        nameView.centerX(y: nameView.frame.minY - floorToScreenPixels(scaleFactor: backingScaleFactor, (20 + input.frame.height + 60)/2.0) - 20)
+        nameView.centerX(y: nameView.frame.minY - floorToScreenPixels(backingScaleFactor, (20 + input.frame.height + 60)/2.0) - 20)
         input.setFrameSize(200, input.frame.height)
         input.centerX(y: nameView.frame.minY + 30 + 20)
         input.setFrameOrigin(input.frame.minX, input.frame.minY)
@@ -173,7 +174,7 @@ class SEPasslockController: ModalViewController {
                     switch transaction.getAccessChallengeData() {
                     case .none:
                         return (value, nil)
-                    case let .plaintextPassword(passcode, _, _), let .numericalPassword(passcode, _, _):
+                    case let .plaintextPassword(passcode), let .numericalPassword(passcode):
                         return (value, passcode)
                     }
                 }

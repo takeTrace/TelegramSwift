@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 import TGUIKit
 
 class MGalleryPeerPhotoItem: MGalleryItem {
@@ -21,21 +22,21 @@ class MGalleryPeerPhotoItem: MGalleryItem {
     }
     
     override var sizeValue: NSSize {
-        if let largest = media.representationForDisplayAtSize(NSMakeSize(1280, 1280)) {
-            return largest.dimensions.fitted(pagerSize)
+        if let largest = media.representationForDisplayAtSize(PixelDimensions(1280, 1280)) {
+            return largest.dimensions.size.fitted(pagerSize)
         }
         return NSZeroSize
     }
     
     override func smallestValue(for size: NSSize) -> NSSize {
-        if let largest = media.representationForDisplayAtSize(NSMakeSize(1280, 1280)) {
-            return largest.dimensions.fitted(size)
+        if let largest = media.representationForDisplayAtSize(PixelDimensions(1280, 1280)) {
+            return largest.dimensions.size.fitted(size)
         }
         return pagerSize
     }
     
     override var status:Signal<MediaResourceStatus, NoError> {
-        if let largestRepresentation = media.representationForDisplayAtSize(NSMakeSize(1280, 1280)) {
+        if let largestRepresentation = media.representationForDisplayAtSize(PixelDimensions(1280, 1280)) {
             return context.account.postbox.mediaBox.resourceStatus(largestRepresentation.resource)
         } else {
             return .never()
@@ -58,50 +59,25 @@ class MGalleryPeerPhotoItem: MGalleryItem {
                 }
             }
             return .single((newSize, orientation))
-         } |> mapToSignal { size, orientation -> Signal<NSImage?, NoError> in
-                return chatGalleryPhoto(account: context.account, imageReference: entry.imageReference(media), toRepresentationSize: NSMakeSize(1280, 1280), scale: System.backingScale, synchronousLoad: true)
+         } |> mapToSignal { size, orientation -> Signal<(NSImage?, ImageOrientation?), NoError> in
+            return chatGalleryPhoto(account: context.account, imageReference: entry.imageReference(media), toRepresentationSize: NSMakeSize(1280, 1280), peer: entry.peer, scale: System.backingScale, synchronousLoad: true)
                     |> map { transform in
                         let image = transform(TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets()))
                         if let orientation = orientation {
                             let transformed = image?.createMatchingBackingDataWithImage(orienation: orientation)
                             if let transformed = transformed {
-                                return NSImage(cgImage: transformed, size: transformed.size)
+                                return (NSImage(cgImage: transformed, size: transformed.size), orientation)
                             }
                         }
                         if let image = image {
-                            return NSImage(cgImage: image, size: image.size)
+                            return (NSImage(cgImage: image, size: image.size), orientation)
                         } else {
-                            return nil
+                            return (nil, nil)
                         }
                 }
         }
-        
-//        let result = combineLatest(size.get(), rotate.get()) |> mapToSignal { [weak self] size, orientation -> Signal<(NSSize, ImageOrientation?), NoError> in
-//            guard let `self` = self else {return .complete()}
-//
-//            return self.smallestValue(for: size) |> map { size in
-//                var newSize = size
-//                if let orientation = orientation {
-//                    if orientation == .right || orientation == .left {
-//                        newSize = NSMakeSize(newSize.height, newSize.width)
-//                    }
-//                }
-//                return (newSize, orientation)
-//            }
-//
-//        } |> mapToSignal { size, orientation -> Signal<((TransformImageArguments) -> DrawingContext?, TransformImageArguments, ImageOrientation?), NoError> in
-//            return chatGalleryPhoto(account: context.account, imageReference: entry.imageReference(media), toRepresentationSize: NSMakeSize(640, 640), scale: System.backingScale, secureIdAccessContext: nil, synchronousLoad: true)
-//                |> map { transform in
-//                    let image = transform(TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets()))
-//                    if let orientation = orientation {
-//                        return image?.createMatchingBackingDataWithImage(orienation: orientation)
-//                    }
-//                    return image
-//            }
-//        }
-        
 
-        if let representation = media.representationForDisplayAtSize(NSMakeSize(1280, 1280))  {
+        if let representation = media.representationForDisplayAtSize(PixelDimensions(1280, 1280))  {
             path.set(context.account.postbox.mediaBox.resourceData(representation.resource) |> mapToSignal { (resource) -> Signal<String, NoError> in
                 
                 if resource.complete {
@@ -111,7 +87,7 @@ class MGalleryPeerPhotoItem: MGalleryItem {
             })
         } 
         
-        self.image.set(result |> map { .image($0) } |> deliverOnMainQueue)
+        self.image.set(result |> map { .image($0.0, $0.1) } |> deliverOnMainQueue)
         
         
         fetch()
@@ -123,7 +99,7 @@ class MGalleryPeerPhotoItem: MGalleryItem {
     
     override func cancel() -> Void {
         super.cancel()
-        if let representation = media.representationForDisplayAtSize(NSMakeSize(1280, 1280))  {
+        if let representation = media.representationForDisplayAtSize(PixelDimensions(1280, 1280))  {
             cancelFreeMediaFileInteractiveFetch(context: context, resource: representation.resource)
         }
         fetching.set(nil)

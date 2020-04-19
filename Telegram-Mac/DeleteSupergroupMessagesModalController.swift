@@ -8,9 +8,10 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
-import PostboxMac
-import SwiftSignalKitMac
+import TelegramCore
+import SyncCore
+import Postbox
+import SwiftSignalKit
 
 
 struct DeleteSupergroupMessagesSet : OptionSet {
@@ -68,7 +69,7 @@ class DeleteSupergroupMessagesModalController: TableModalViewController {
         self.peerId = peerId
         self.memberId = memberId
         self.onComplete = onComplete
-        super.init(frame: NSMakeRect(0, 0, 280, 260))
+        super.init(frame: NSMakeRect(0, 0, 350, 260))
         bar = .init(height: 0)
     }
     
@@ -153,7 +154,7 @@ class DeleteSupergroupMessagesModalController: TableModalViewController {
     }
     
     private func perform() {
-        var signals:[Signal<Void, NoError>] = [deleteMessagesInteractively(postbox: context.account.postbox, messageIds: messageIds, type: .forEveryone)]
+        var signals:[Signal<Void, NoError>] = [deleteMessagesInteractively(account: context.account, messageIds: messageIds, type: .forEveryone)]
         if options.contains(.banUser) {
             
             signals.append(context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(account: context.account, peerId: peerId, memberId: memberId, bannedRights: TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max)))

@@ -7,9 +7,10 @@
 //
 
 import Cocoa
-import SwiftSignalKitMac
-import TelegramCoreMac
-import PostboxMac
+import SwiftSignalKit
+import TelegramCore
+import SyncCore
+import Postbox
 import TGUIKit
 
 
@@ -45,7 +46,7 @@ class ContextStickerRowItem: TableRowItem {
 class ContextStickerRowView : TableRowView, ModalPreviewRowViewProtocol {
 
     
-    func fileAtPoint(_ point:NSPoint) -> QuickPreviewMedia? {
+    func fileAtPoint(_ point:NSPoint) -> (QuickPreviewMedia, NSView?)? {
         if let item = item as? ContextStickerRowItem {
             var i:Int = 0
             for subview in subviews {
@@ -53,9 +54,9 @@ class ContextStickerRowView : TableRowView, ModalPreviewRowViewProtocol {
                     let file = item.result.results[i].file
                     let reference = file.stickerReference != nil ? FileMediaReference.stickerPack(stickerPack: file.stickerReference!, media: file) : FileMediaReference.standalone(media: file)
                     if file.isAnimatedSticker {
-                        return .file(reference, AnimatedStickerPreviewModalView.self)
+                        return (.file(reference, AnimatedStickerPreviewModalView.self), subview)
                     } else {
-                        return .file(reference, StickerPreviewModalView.self)
+                        return (.file(reference, StickerPreviewModalView.self), subview)
                     }
                 }
                 i += 1
@@ -70,11 +71,18 @@ class ContextStickerRowView : TableRowView, ModalPreviewRowViewProtocol {
             
             let reference = fileAtPoint(convert(event.locationInWindow, from: nil))
             
-            if let reference = reference?.fileReference?.media.stickerReference {
+            if let reference = reference?.0.fileReference?.media.stickerReference {
                 menu.addItem(ContextMenuItem(L10n.contextViewStickerSet, handler: {
-                    showModal(with: StickersPackPreviewModalController(item.context, peerId: item.chatInteraction.peerId, reference: reference), for: mainWindow)
+                    showModal(with: StickerPackPreviewModalController(item.context, peerId: item.chatInteraction.peerId, reference: reference), for: mainWindow)
                 }))
             }
+            if let file = reference?.0.fileReference?.media {
+                menu.addItem(ContextMenuItem(L10n.chatSendWithoutSound, handler: { [weak item] in
+                    item?.chatInteraction.sendAppFile(file, true)
+                    item?.chatInteraction.clearInput()
+                }))
+            }
+          
         }
         return menu
     }
@@ -106,7 +114,7 @@ class ContextStickerRowView : TableRowView, ModalPreviewRowViewProtocol {
                         if let slowMode = item?.chatInteraction.presentation.slowMode, slowMode.hasLocked {
                             showSlowModeTimeoutTooltip(slowMode, for: control)
                         } else {
-                            item?.chatInteraction.sendAppFile(data.file)
+                            item?.chatInteraction.sendAppFile(data.file, false)
                             item?.chatInteraction.clearInput()
                         }
                     }, for: .Click)
@@ -119,18 +127,18 @@ class ContextStickerRowView : TableRowView, ModalPreviewRowViewProtocol {
                     
                    
                     if data.file.isAnimatedSticker {
-                        let view = ChatMediaAnimatedStickerView(frame: NSZeroRect)
+                        let view = MediaAnimatedStickerView(frame: NSZeroRect)
                         let size = NSMakeSize(round(item.result.sizes[i].width - 8), round(item.result.sizes[i].height - 8))
                         view.update(with: data.file, size: size, context: item.context, parent: nil, table: item.table, parameters: nil, animated: false, positionFlags: nil, approximateSynchronousValue: false)
                         view.userInteractionEnabled = false
                         container.addSubview(view)
                     } else {
                         let file = data.file
-                        let imageSize = file.dimensions?.aspectFitted(NSMakeSize(item.result.sizes[i].width - 8, item.result.sizes[i].height - 8)) ?? item.result.sizes[i]
+                        let imageSize = file.dimensions?.size.aspectFitted(NSMakeSize(item.result.sizes[i].width - 8, item.result.sizes[i].height - 8)) ?? item.result.sizes[i]
                         let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: imageSize, boundingSize: imageSize, intrinsicInsets: NSEdgeInsets())
                         let view = TransformImageView()
                         view.setSignal(signal: cachedMedia(media: file, arguments: arguments, scale: backingScaleFactor), clearInstantly: false)
-                        view.setSignal( chatMessageSticker(postbox: item.context.account.postbox, file: data.file, small: true, scale: backingScaleFactor, fetched: true), cacheImage: { [weak file] result in
+                        view.setSignal( chatMessageSticker(postbox: item.context.account.postbox, file: data.file, small: false, scale: backingScaleFactor, fetched: true), cacheImage: { [weak file] result in
                             if let file = file {
                                 cacheMedia(result, media: file, arguments: arguments, scale: System.backingScale)
                             }
@@ -163,7 +171,7 @@ class ContextStickerRowView : TableRowView, ModalPreviewRowViewProtocol {
         if let item = item as? ContextStickerRowItem  {
             let defSize = NSMakeSize( item.result.sizes[0].width - 4,  item.result.sizes[0].height - 4)
             
-            let defInset = floorToScreenPixels(scaleFactor: backingScaleFactor, (frame.width - defSize.width * CGFloat(item.result.maxCount)) / CGFloat(item.result.maxCount + 1))
+            let defInset = floorToScreenPixels(backingScaleFactor, (frame.width - defSize.width * CGFloat(item.result.maxCount)) / CGFloat(item.result.maxCount + 1))
             var inset = defInset
             
             for i in 0 ..< item.result.entries.count {

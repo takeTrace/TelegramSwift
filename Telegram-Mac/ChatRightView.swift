@@ -8,7 +8,8 @@
 
 import Cocoa
 import TGUIKit
-import TelegramCoreMac
+import TelegramCore
+import SyncCore
 
 
 class ChatRightView: View {
@@ -115,9 +116,9 @@ class ChatRightView: View {
             
             if let sendingView = sendingView {
                 if isReversed {
-                    sendingView.setFrameOrigin(frame.width - sendingView.frame.width - item.stateOverlayAdditionCorner, (item.isStateOverlayLayout ? 3 : 2))
+                    sendingView.setFrameOrigin(frame.width - sendingView.frame.width - item.stateOverlayAdditionCorner, (item.isStateOverlayLayout ? 2 : 1))
                 } else {
-                    sendingView.setFrameOrigin(frame.width - rightInset - item.stateOverlayAdditionCorner, (item.isStateOverlayLayout ? 3 : 2))
+                    sendingView.setFrameOrigin(frame.width - rightInset - item.stateOverlayAdditionCorner, (item.isStateOverlayLayout ? 2 : 1))
                 }
             }
 
@@ -136,7 +137,7 @@ class ChatRightView: View {
             
             if item.isStateOverlayLayout {
                 ctx.round(frame.size, frame.height/2)
-                ctx.setFillColor(theme.colors.blackTransparent.cgColor)
+                ctx.setFillColor(item.stateOverlayBackgroundColor.cgColor)
                 ctx.fill(layer.bounds)
             }
             
