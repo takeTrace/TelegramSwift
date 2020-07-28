@@ -76,7 +76,7 @@ class ChatGroupedItem: ChatRowItem {
                     }
                 }
                 if hasEntities {
-                    caption = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text.fixed, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), openBank: chatInteraction.openBank).mutableCopy() as! NSMutableAttributedString
+                    caption = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text.fixed, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: chatInteraction.modalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), openBank: chatInteraction.openBank).mutableCopy() as! NSMutableAttributedString
                 }
                 
                 if !hasEntities || message.flags.contains(.Failed) || message.flags.contains(.Unsent) || message.flags.contains(.Sending) {
@@ -541,10 +541,14 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
                         }
                         if selectingControl == nil {
                             selectingControl = SelectingControl(unselectedImage: theme.icons.chatGroupToggleUnselected, selectedImage: theme.icons.chatGroupToggleSelected)
+                            content.addSubview(selectingControl!)
+                            if animated {
+                                selectingControl?.layer?.animateAlpha(from: 0, to: 1, duration: 0.2)
+                                selectingControl?.layer?.animateScaleSpring(from: 0.2, to: 1.0, duration: 0.2)
+                            }
                         }
                         if let selectingControl = selectingControl {
                             selectingControl.setFrameOrigin(content.frame.width - selectingControl.frame.width - 5, 5)
-                            content.addSubview(selectingControl)
                         }
                     }
                 }
@@ -553,7 +557,14 @@ private class ChatGroupedView : ChatRowView , ModalPreviewRowViewProtocol {
                     let subviews = content.subviews
                     for subview in subviews {
                         if subview is SelectingControl {
-                            subview.removeFromSuperview()
+                            if animated {
+                                subview.layer?.animateAlpha(from: 1, to: 0, duration: 0.2, removeOnCompletion: false)
+                                subview.layer?.animateScaleSpring(from: 1, to: 0.2, duration: 0.2, removeOnCompletion: false, completion: { [weak subview] completed in
+                                    if completed {
+                                        subview?.removeFromSuperview()
+                                    }
+                                })
+                            }
                             break
                         }
                     }

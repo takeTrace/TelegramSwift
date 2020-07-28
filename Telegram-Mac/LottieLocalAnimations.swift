@@ -33,6 +33,7 @@ enum LocalAnimatedSticker {
     case new_folder
     case folder_empty
     case graph_loading
+    case dart_idle
     var file: TelegramMediaFile {
         let resource:LocalBundleResource
         switch self {
@@ -78,13 +79,16 @@ enum LocalAnimatedSticker {
             resource = LocalBundleResource(name: "folder_empty", ext: "tgs")
         case .graph_loading:
             resource = LocalBundleResource(name: "graph_loading", ext: "tgs")
+        case .dart_idle:
+            resource = LocalBundleResource(name: "dart_idle", ext: "tgs")
         }
-        return TelegramMediaFile(fileId: MediaId(namespace: 0, id: MediaId.Id(resource.name.hashValue)), partialReference: nil, resource: resource, previewRepresentations: [], immediateThumbnailData: nil, mimeType: "application/x-tgsticker", size: nil, attributes: [.Sticker(displayText: "", packReference: nil, maskData: nil), .Animated, .FileName(fileName: "telegram-animoji.tgs")])
+        return TelegramMediaFile(fileId: MediaId(namespace: 0, id: MediaId.Id(resource.name.hashValue)), partialReference: nil, resource: resource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/x-tgsticker", size: nil, attributes: [.Sticker(displayText: "", packReference: nil, maskData: nil), .Animated, .FileName(fileName: "telegram-animoji.tgs")])
     }
     
     var parameters: ChatAnimatedStickerMediaLayoutParameters {
         let playPolicy: LottiePlayPolicy?
         var alwaysAccept: Bool? = nil
+        var hidePlayer: Bool = true
         switch self {
         case .brilliant_static:
             playPolicy = .loop
@@ -118,7 +122,8 @@ enum LocalAnimatedSticker {
         case .think_spectacular:
             playPolicy = .once
         case .success_saved:
-            playPolicy = .once
+            playPolicy = .onceEnd
+            hidePlayer = false
         case .dice_idle:
             playPolicy = .once
         case .folder:
@@ -129,7 +134,9 @@ enum LocalAnimatedSticker {
             playPolicy = .once
         case .graph_loading:
             playPolicy = .loop
+        case .dart_idle:
+            playPolicy = .once
         }
-        return ChatAnimatedStickerMediaLayoutParameters(playPolicy: playPolicy, alwaysAccept: alwaysAccept, media: self.file)
+        return ChatAnimatedStickerMediaLayoutParameters(playPolicy: playPolicy, alwaysAccept: alwaysAccept, hidePlayer: hidePlayer, media: self.file)
     }
 }

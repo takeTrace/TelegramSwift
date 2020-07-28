@@ -14,20 +14,48 @@ import Postbox
 import SyncCore
 import GraphCore
 
-private struct UIStatsState : Equatable {
+
+
+struct UIStatsState : Equatable {
+    
+    enum RevealSection : Hashable {
+        case topPosters
+        case topAdmins
+        case topInviters
+        
+        var id: InputDataIdentifier {
+            switch self {
+            case .topPosters:
+                return InputDataIdentifier("_id_top_posters")
+            case .topAdmins:
+                return InputDataIdentifier("_id_top_admins")
+            case .topInviters:
+                return InputDataIdentifier("_id_top_inviters")
+            }
+        }
+    }
+    
     let loading: Set<InputDataIdentifier>
-    init(loading: Set<InputDataIdentifier>) {
+    let revealed:Set<RevealSection>
+    init(loading: Set<InputDataIdentifier>, revealed: Set<RevealSection> = Set()) {
         self.loading = loading
+        self.revealed = revealed
     }
     func withAddedLoading(_ token: InputDataIdentifier) -> UIStatsState {
         var loading = self.loading
         loading.insert(token)
-        return UIStatsState(loading: loading)
+        return UIStatsState(loading: loading, revealed: self.revealed)
     }
     func withRemovedLoading(_ token: InputDataIdentifier) -> UIStatsState {
         var loading = self.loading
         loading.remove(token)
-        return UIStatsState(loading: loading)
+        return UIStatsState(loading: loading, revealed: self.revealed)
+    }
+    
+    func withRevealedSection(_ section: RevealSection) -> UIStatsState {
+        var revealed = self.revealed
+        revealed.insert(section)
+        return UIStatsState(loading: self.loading, revealed: revealed)
     }
 }
 
@@ -76,7 +104,7 @@ private func statsEntries(_ state: ChannelStatsContextState, uiState: UIStatsSta
         
         
         struct Graph {
-            let graph: ChannelStatsGraph
+            let graph: StatsGraph
             let title: String
             let identifier: InputDataIdentifier
             let type: ChartItemType
@@ -93,18 +121,6 @@ private func statsEntries(_ state: ChannelStatsContextState, uiState: UIStatsSta
             updateIsLoading(identifier, true)
         }))
 
-        graphs.append(Graph(graph: stats.viewsBySourceGraph, title: L10n.channelStatsGraphViewsBySource, identifier: InputDataIdentifier("viewsBySourceGraph"), type: .bars, load: { identifier in
-            context.loadViewsBySourceGraph()
-            updateIsLoading(identifier, true)
-        }))
-        graphs.append(Graph(graph: stats.newFollowersBySourceGraph, title: L10n.channelStatsGraphNewFollowersBySource, identifier: InputDataIdentifier("newFollowersBySourceGraph"), type: .bars, load: { identifier in
-            context.loadNewFollowersBySourceGraph()
-            updateIsLoading(identifier, true)
-        }))
-        graphs.append(Graph(graph: stats.languagesGraph, title: L10n.channelStatsGraphLanguage, identifier: InputDataIdentifier("languagesGraph"), type: .pie, load: { identifier in
-            context.loadLanguagesGraph()
-            updateIsLoading(identifier, true)
-        }))
         graphs.append(Graph(graph: stats.muteGraph, title: L10n.channelStatsGraphNotifications, identifier: InputDataIdentifier("muteGraph"), type: .lines, load: { identifier in
             context.loadMuteGraph()
             updateIsLoading(identifier, true)
@@ -114,6 +130,23 @@ private func statsEntries(_ state: ChannelStatsContextState, uiState: UIStatsSta
             context.loadTopHoursGraph()
             updateIsLoading(identifier, true)
         }))
+        
+        graphs.append(Graph(graph: stats.viewsBySourceGraph, title: L10n.channelStatsGraphViewsBySource, identifier: InputDataIdentifier("viewsBySourceGraph"), type: .bars, load: { identifier in
+            context.loadViewsBySourceGraph()
+            updateIsLoading(identifier, true)
+        }))
+        
+        
+        graphs.append(Graph(graph: stats.newFollowersBySourceGraph, title: L10n.channelStatsGraphNewFollowersBySource, identifier: InputDataIdentifier("newFollowersBySourceGraph"), type: .bars, load: { identifier in
+            context.loadNewFollowersBySourceGraph()
+            updateIsLoading(identifier, true)
+        }))
+        graphs.append(Graph(graph: stats.languagesGraph, title: L10n.channelStatsGraphLanguage, identifier: InputDataIdentifier("languagesGraph"), type: .pie, load: { identifier in
+            context.loadLanguagesGraph()
+            updateIsLoading(identifier, true)
+        }))
+
+    
         
         graphs.append(Graph(graph: stats.interactionsGraph, title: L10n.channelStatsGraphInteractions, identifier: InputDataIdentifier("interactionsGraph"), type: .twoAxisStep, load: { identifier in
             context.loadInteractionsGraph()
@@ -130,7 +163,7 @@ private func statsEntries(_ state: ChannelStatsContextState, uiState: UIStatsSta
             case let .Loaded(_, string):                
                 ChartsDataManager.readChart(data: string.data(using: .utf8)!, sync: true, success: { collection in
                     entries.append(.custom(sectionId: sectionId, index: index, value: .none, identifier: graph.identifier, equatable: InputDataEquatable(graph.graph), item: { initialSize, stableId in
-                        return StatisticRowItem(initialSize, stableId: stableId, collection: collection, viewType: .singleItem, type: graph.type, getDetailsData: { date, completion in
+                        return StatisticRowItem(initialSize, stableId: stableId, context: accountContext, collection: collection, viewType: .singleItem, type: graph.type, getDetailsData: { date, completion in
                             detailedDisposable.set(context.loadDetailedGraph(graph.graph, x: Int64(date.timeIntervalSince1970) * 1000).start(next: { graph in
                                 if let graph = graph, case let .Loaded(_, data) = graph {
                                     completion(data)
@@ -230,10 +263,7 @@ func ChannelStatsViewController(_ context: AccountContext, peerId: PeerId, datac
         }
         
         let messages = messageView?.entries.map { $0.message }.filter { interactions?[$0.id] != nil }.sorted(by: { (lhsMessage, rhsMessage) -> Bool in
-            let lhsViews = max(lhsMessage.channelViewsCount ?? 0, interactions?[lhsMessage.id]?.views ?? 0)
-            let rhsViews = max(rhsMessage.channelViewsCount ?? 0, interactions?[rhsMessage.id]?.views ?? 0)
-            return lhsViews > rhsViews
-                //return lhsMessage.timestamp > rhsMessage.timestamp
+            return lhsMessage.timestamp > rhsMessage.timestamp
         })
         
 
@@ -257,6 +287,7 @@ func ChannelStatsViewController(_ context: AccountContext, peerId: PeerId, datac
     controller.contextOject = statsContext
     controller.didLoaded = { controller, _ in
         controller.tableView.alwaysOpenRowsOnMouseUp = true
+        controller.tableView.needUpdateVisibleAfterScroll = true
     }
     
     controller.onDeinit = {
@@ -265,45 +296,3 @@ func ChannelStatsViewController(_ context: AccountContext, peerId: PeerId, datac
     
     return controller
 }
-/*
- private let peerId: PeerId
- private let statsContext: ChannelStatsContext
- init(_ context: AccountContext, peerId: PeerId, datacenterId: Int32) {
- self.peerId = peerId
- self.statsContext = ChannelStatsContext(network: context.account.network, postbox: context.account.postbox, datacenterId: datacenterId, peerId: peerId)
- super.init(context)
- }
- 
- override func viewDidLoad() {
- super.viewDidLoad()
- 
- readyOnce()
- 
- //  self.statsContext.loadFollowersGraph()
- let signal = self.statsContext.state |> deliverOnMainQueue
- signal.start(next: { [weak self] state in
- if let state = state.stats {
- switch state.muteGraph {
- case let .Loaded(string):
- ChartsDataManager.readChart(data: string.data(using: .utf8)!, sync: false, success: { collection in
- let controller: BaseChartController
- // if bar {
- controller = DailyBarsChartController(chartsCollection: collection)
- // } else {
- // controller = GeneralLinesChartController(chartsCollection: collection)
- //  }
- self?.genericView.chartView.setup(controller: controller, title: "Mute graph")
- self?.genericView.chartView.apply(theme: .day, animated: false)
- 
- 
- }, failure: { error in
- var bp:Int = 0
- bp += 1
- })
- default:
- break
- }
- }
- })
- }
- */

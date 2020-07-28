@@ -36,7 +36,9 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     private var replyMarkupView:View?
     private(set) var forwardName:TextView?
     private(set) var captionView:TextView?
-    private var shareControl:ImageButton?
+    private var shareView:ImageButton?
+    private var likeView:ImageButton?
+
     private var nameView:TextView?
     private var adminBadge: TextView?
     let rightView:ChatRightView = ChatRightView(frame:NSZeroRect)
@@ -51,6 +53,8 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     
     private var scamButton: ImageButton? = nil
     private var scamForwardButton: ImageButton? = nil
+    
+    private var psaButton: ImageButton? = nil
 
     let rowView: View
 
@@ -100,7 +104,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         
         let inset = size.height - gradientRect.minY + (frame.height - bubbleFrame.maxY) - 30
         if visibleRect.height > 0 {
-            bubbleView.update(rect: self.frame.offsetBy(dx: 0, dy: inset), within: size, animated: false, rotated: rotated)
+            bubbleView.update(rect: self.frame.offsetBy(dx: 0, dy: inset), within: size, animated: animated, rotated: rotated)
         }
     }
     
@@ -349,25 +353,6 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
                                 }
                             })
                         })
-                        
-//                        item.account.postbox.transaction { transaction -> T in
-//                            transaction
-//                        }
-//
-                      
-                        
-                        
-//                        confirm(for: mainWindow, header: L10n.alertSendErrorHeader, information: L10n.alertSendErrorText, okTitle: L10n.alertSendErrorResend, cancelTitle: L10n.alertSendErrorIgnore, thridTitle: L10n.alertSendErrorDelete, fourTitle: "Resend All", successHandler: { result in
-//
-//                            switch result {
-//                            case .thrid:
-//                                item.deleteMessage()
-//                            default:
-//                                item.resendMessage()
-//                            }
-//
-//
-//                        })
                     } else {
                         forceSelectItem(item, onRightClick: true)
                     }
@@ -421,7 +406,14 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
             
             //draw separator
             if let fwdType = item.forwardType, !item.isBubbled, layer == rowView.layer {
-                ctx.setFillColor(item.presentation.colors.accent.cgColor)
+                
+                let color: NSColor
+                if item.isPsa {
+                    color = item.presentation.colors.greenUI
+                } else {
+                    color = item.presentation.colors.link
+                }
+                ctx.setFillColor(color.cgColor)
                 switch fwdType {
                 case .ShortHeader:
                     let height = frame.height - item.forwardNameInset.y - item.defaultContentTopOffset
@@ -450,8 +442,11 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     }
     
     override func updateMouse() {
-        if let shareControl = self.shareControl, let item = item as? ChatRowItem {
-            shareControl.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() ? 1.0 : 0.0, animated: true)
+        if let shareView = self.shareView, let item = item as? ChatRowItem {
+            shareView.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() ? 1.0 : 0.0, animated: true)
+        }
+        if let likeControl = self.likeView, let item = item as? ChatRowItem {
+            likeControl.change(opacity: item.chatInteraction.presentation.state != .selecting && mouseInside() ? 1.0 : 0.0, animated: true)
         }
     }
     
@@ -497,7 +492,7 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
     var bubbleFrame: NSRect {
         guard let item = item as? ChatRowItem else {return NSZeroRect}
         let bubbleFrame = item.bubbleFrame
-        return NSMakeRect(item.isIncoming ? item.bubbleFrame.minX : frame.width - bubbleFrame.width - item.leftInset, bubbleFrame.minY, bubbleFrame.width, bubbleFrame.height)
+        return NSMakeRect(item.isIncoming ? bubbleFrame.minX : frame.width - bubbleFrame.width - item.leftInset, bubbleFrame.minY, bubbleFrame.width, bubbleFrame.height)
     }
     
     var rightFrame: NSRect {
@@ -624,6 +619,22 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         return point
     }
     
+    var psaPoint: NSPoint {
+        guard let item = item as? ChatRowItem else {return NSZeroPoint}
+        var point: NSPoint = .zero
+        if item.isBubbled, let _ = item.forwardNameLayout {
+            point.x = item.bubbleFrame.width - 20
+            point.y = self.forwardNamePoint.y
+        } else if item.entry.renderType == .list, let name = item.authorText {
+            point = self.namePoint
+            point.x += name.layoutSize.width
+            point.y -= 6
+        }
+       
+       // point.y -= 7
+        return point
+    }
+    
     var scamForwardPoint: NSPoint {
         guard let item = item as? ChatRowItem, let forwardName = item.forwardNameLayout else {return NSZeroPoint}
         
@@ -728,6 +739,9 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
             
             scamButton?.setFrameOrigin(scamPoint)
             scamForwardButton?.setFrameOrigin(scamForwardPoint)
+            
+            psaButton?.setFrameOrigin(psaPoint)
+            
             avatar?.frame = avatarFrame
             captionView?.frame = captionFrame
             
@@ -737,17 +751,40 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
             
             selectingView?.setFrameOrigin(selectingPoint)
             
+            animatedView?.frame = bounds
+            
 
             swipingRightView.frame = NSMakeRect(frame.width, 0, rightRevealWidth, frame.height)
             
+            shareView?.setFrameOrigin(shareViewPoint(item))
+            likeView?.setFrameOrigin(likeViewPoint(item))
             
-            if let shareControl = shareControl {
-                if item.isBubbled {
-                    shareControl.setFrameOrigin(item.isIncoming ? max(bubbleFrame.maxX + 15, item.isStateOverlayLayout ? rightFrame.width + 15 : 0) : bubbleFrame.minX - shareControl.frame.width - 15, bubbleFrame.maxY - shareControl.frame.height - (item.isVideoOrBigEmoji ? rightFrame.height + 14 : 0))
-                } else {
-                    shareControl.setFrameOrigin(frame.width - 20.0 - shareControl.frame.width, rightView.frame.maxY )
-                }
-            }
+        }
+    }
+    
+    func shareViewPoint(_ item: ChatRowItem) -> NSPoint {
+        guard let shareView = self.shareView else {
+            return .zero
+        }
+        if item.isBubbled {
+            return NSMakePoint(item.isIncoming ? max(bubbleFrame.maxX + 10, item.isStateOverlayLayout ? rightFrame.width + 10 : 0) : bubbleFrame.minX - shareView.frame.width - 10, bubbleFrame.maxY - (shareView.frame.height - 2) - (item.isVideoOrBigEmoji ? rightFrame.height + 14 : 0))
+        } else {
+            return NSMakePoint(frame.width - 20.0 - shareView.frame.width, rightView.frame.maxY)
+        }
+    }
+    
+    func likeViewPoint(_ item: ChatRowItem) -> NSPoint {
+        guard let likeView = self.likeView else {
+            return .zero
+        }
+        var controlOffset: CGFloat = 0
+        if let shareView = shareView {
+            controlOffset += shareView.frame.width + 10
+        }
+        if item.isBubbled {
+            return NSMakePoint(item.isIncoming ? max(bubbleFrame.maxX + 10 + controlOffset, item.isStateOverlayLayout ? rightFrame.width + 10 + controlOffset : 0) : bubbleFrame.minX - likeView.frame.width - 10 - controlOffset, bubbleFrame.maxY - (likeView.frame.height - 2) - (item.isVideoOrBigEmoji ? rightFrame.height + 14 : 0))
+        } else {
+            return NSMakePoint(frame.width - 20.0 - likeView.frame.width, rightView.frame.maxY)
         }
     }
     
@@ -808,6 +845,28 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         }
     }
     
+    func fillPsaButton(_ item: ChatRowItem) -> Void {
+        if let text = item.psaButton, item.forwardNameLayout != nil || !item.isBubbled {
+            
+            let icon = item.presentation.chat.channelInfoPromo(item.isIncoming, item.isBubbled, icons: theme.icons)
+            
+            if psaButton == nil {
+                psaButton = ImageButton()
+                psaButton?.autohighlight = false
+                psaButton?.setFrameSize(icon.backingSize)
+                rowView.addSubview(psaButton!)
+                psaButton?.set(handler: { control in
+                    tooltip(for: control, text: "", attributedText: text, interactions: globalLinkExecutor)
+                }, for: .Click)
+            }
+            psaButton?.set(image: icon, for: .Normal)
+            
+        } else {
+            psaButton?.removeFromSuperview()
+            psaButton = nil
+        }
+    }
+    
     func fillScamButton(_ item: ChatRowItem) -> Void {
         if item.isScam, item.canFillAuthorName {
             if scamButton == nil {
@@ -846,61 +905,74 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         }
     }
     
-    func fillCaption(_ item:ChatRowItem) -> Void {
+    func fillCaption(_ item:ChatRowItem, animated: Bool) -> Void {
         if let layout = item.captionLayout {
             if captionView == nil {
                 captionView = TextView()
                 rowView.addSubview(captionView!)
                 rowView.addSubview(rightView)
+                captionView?.frame = captionFrame
             }
             //addSubview(captionView!, positioned: .below, relativeTo: rightView)
             captionView?.update(layout)
         } else {
-            captionView?.removeFromSuperview()
-            captionView = nil
+            if animated, let captionView = self.captionView {
+                self.captionView = nil
+                captionView.layer?.animateAlpha(from: 1, to: 0, duration: 0.2, removeOnCompletion: false, completion: { [weak captionView] _ in
+                    captionView?.removeFromSuperview()
+                })
+            } else {
+                captionView?.removeFromSuperview()
+                captionView = nil
+            }
         }
     }
     
-    func fillShareControl(_ item:ChatRowItem) -> Void {
-        if item.isSharable || item.isStorage {
-            if shareControl == nil {
-                shareControl = ImageButton()
-                shareControl?.disableActions()
-                shareControl?.change(opacity: 0, animated: false)
-                rowView.addSubview(shareControl!)
+    func fillShareView(_ item:ChatRowItem, animated: Bool) -> Void {
+        if item.shareVisible || item.isStorage {
+            var isPresented: Bool = true
+            if shareView == nil {
+                shareView = ImageButton()
+                shareView?.set(hoverAdditionPolicy: .enlarge(value: 1.05), for: .Hover)
+                shareView?.set(hoverAdditionPolicy: .enlarge(value: 1.0), for: .Normal)
+                shareView?.set(hoverAdditionPolicy: .enlarge(value: 1.05), for: .Highlight)
+                shareView?.set(additionBackgroundMultiplier: 0.95, for: .Normal)
+                shareView?.set(additionBackgroundMultiplier: 0.95, for: .Hover)
+                shareView?.set(additionBackgroundMultiplier: 0.95, for: .Highlight)
+                shareView?.disableActions()
+                shareView?.change(opacity: 0, animated: false)
+                rowView.addSubview(shareView!)
+                isPresented = false
             }
             
-          
-            
-            guard let shareControl = shareControl else {return}
-            
-            
+            guard let control = shareView else {return}
+            control.autohighlight = false
 
-            if item.isBubbled && item.presentation.backgroundMode.hasWallpapaer  {
-                shareControl.set(image: item.isStorage ? item.presentation.icons.chatGotoMessageWallpaper : item.presentation.icons.chatShareWallpaper, for: .Normal)
-                _ = shareControl.sizeToFit()
-                shareControl.setFrameSize(NSMakeSize(shareControl.frame.width + 10, shareControl.frame.height + 10))
-                shareControl.background = item.presentation.colors.background
-                shareControl.layer?.cornerRadius = shareControl.frame.height / 2
+            
+            if animated && isPresented {
+                control.change(pos: shareViewPoint(item), animated: true)
             } else {
-                shareControl.set(image: item.isStorage ? item.presentation.icons.chatGoMessage : item.presentation.icons.chatForwardMessagesActive, for: .Normal)
-                _ = shareControl.sizeToFit()
-                shareControl.background = .clear
+                control.setFrameOrigin(shareViewPoint(item))
             }
             
-//
-//            if item.isBubbled {
-//                shareControl.setFrameSize(shareControl.frame.width + 5, shareControl.frame.height + 5)
-//                shareControl.set(background: item.presentation.colors.grayForeground, for: .Normal)
-//                shareControl.layer?.cornerRadius = shareControl.frame.height / 2
-//            } else {
-//                shareControl.sizeToFit()
-//                shareControl.set(background: item.presentation.colors.background, for: .Normal)
-//                shareControl.layer?.cornerRadius = 0
-//            }
+            if item.isBubbled && item.presentation.backgroundMode.hasWallpapaer  {
+                
+                control.set(image: item.isStorage ? item.presentation.chat.chat_goto_message_bubble(theme: item.presentation) : item.presentation.chat.chat_share_bubble(theme: item.presentation), for: .Normal)
+                _ = control.sizeToFit()
+                let size = NSMakeSize(control.frame.width, control.frame.height)
+                control.setFrameSize(NSMakeSize(floorToScreenPixels(backingScaleFactor, (size.width + 4) * 1.05), floorToScreenPixels(backingScaleFactor, (size.height + 4) * 1.05)))
+                control.set(additionBackgroundColor: item.presentation.chatServiceItemColor, for: .Normal)
+                control.set(additionBackgroundColor: item.presentation.chatServiceItemColor, for: .Hover)
+                
+                control.set(cornerRadius: .half, for: .Normal)
+            } else {
+                control.set(image: item.isStorage ? item.presentation.icons.chat_goto_message : item.presentation.icons.chat_share_message, for: .Normal)
+                _ = control.sizeToFit()
+                control.background = .clear
+            }
             
-            shareControl.removeAllHandlers()
-            shareControl.set(handler: { [ weak item] _ in
+            control.removeAllHandlers()
+            control.set(handler: { [ weak item] _ in
                 if let item = item {
                     if item.isStorage {
                         item.gotoSourceMessage()
@@ -910,26 +982,113 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
                 }
             }, for: .Click)
         } else {
-            shareControl?.removeFromSuperview()
-            shareControl = nil
+            shareView?.removeFromSuperview()
+            shareView = nil
         }
     }
     
-    func fillReplyMarkup(_ item:ChatRowItem) -> Void {
+    private func likeImage(_ item: ChatRowItem) -> CGImage {
+        if item.isLiked {
+            return item.presentation.chat.chat_like_message_unlike_bubble(theme: item.presentation)
+        } else {
+            return item.presentation.chat.chat_like_message_bubble(theme: item.presentation)
+        }
+    }
+    
+    override func change(size: NSSize, animated: Bool, _ save: Bool = true, removeOnCompletion: Bool = true, duration: Double = 0.2, timingFunction: CAMediaTimingFunctionName = CAMediaTimingFunctionName.easeOut, completion: ((Bool) -> Void)? = nil) {
+        
+        rowView.change(size: size, animated: animated, save, removeOnCompletion: removeOnCompletion, duration: duration, timingFunction: timingFunction, completion: completion)
+        
+        super.change(size: size, animated: animated, save, removeOnCompletion: removeOnCompletion, duration: duration, timingFunction: timingFunction, completion: completion)
+        
+    }
+    
+    func fillLikeView(_ item: ChatRowItem, animated: Bool) {
+        if item.isLikable  {
+            var isPresented: Bool = true
+            if likeView == nil {
+                likeView = ImageButton()
+                likeView?.set(hoverAdditionPolicy: .enlarge(value: 1.05), for: .Hover)
+                likeView?.set(hoverAdditionPolicy: .enlarge(value: 1.0), for: .Normal)
+                likeView?.set(hoverAdditionPolicy: .enlarge(value: 1.05), for: .Highlight)
+                likeView?.set(additionBackgroundMultiplier: 0.95, for: .Normal)
+                likeView?.set(additionBackgroundMultiplier: 0.95, for: .Hover)
+                likeView?.set(additionBackgroundMultiplier: 0.95, for: .Highlight)
+                likeView?.autohighlight = false
+                likeView?.disableActions()
+                likeView?.change(opacity: 0, animated: false)
+                rowView.addSubview(likeView!)
+                isPresented = false
+            }
+            
+            guard let control = likeView else {return}
+            
+            if animated && isPresented {
+                control.change(pos: likeViewPoint(item), animated: true)
+            }
+
+            let isLiked = item.isLiked
+            
+            if item.isBubbled && item.presentation.backgroundMode.hasWallpapaer  {
+                control.set(image: likeImage(item), for: .Normal)
+                
+                _ = control.sizeToFit()
+                let size = NSMakeSize(control.frame.width, control.frame.height)
+                control.setFrameSize(NSMakeSize(floorToScreenPixels(backingScaleFactor, (size.width + 4) * 1.05), floorToScreenPixels(backingScaleFactor, (size.height + 4) * 1.05)))
+                control.set(additionBackgroundColor: item.presentation.chatServiceItemColor, for: .Normal)
+                
+                control.set(cornerRadius: .half, for: .Normal)
+            } else {
+                control.set(image: item.presentation.icons.chat_like_message, for: .Normal)
+                _ = control.sizeToFit()
+                control.background = .clear
+            }
+            
+            control.removeAllHandlers()
+            control.set(handler: { [weak item] control in
+                if let item = item {
+                    let presentation = item.presentation.chat
+                    let from = isLiked ? presentation.chat_like_message_unlike_bubble(theme: item.presentation) : presentation.chat_like_message_bubble(theme: item.presentation)
+                    let to = isLiked ? presentation.chat_like_message_bubble(theme: item.presentation) : presentation.chat_like_message_unlike_bubble(theme: item.presentation)
+                    
+                    (control as? ImageButton)?.applyAnimation(from: from, to: to, animation: .replaceScale)
+                    
+                    item.toggleLike()
+                }
+            
+                
+            }, for: .Click)
+        } else {
+            likeView?.removeFromSuperview()
+            likeView = nil
+        }
+    }
+    
+    func fillReplyMarkup(_ item:ChatRowItem, animated: Bool) -> Void {
         if let replyMarkup = item.replyMarkupModel {
             if replyMarkupView == nil {
                 replyMarkupView = View()
                 rowView.addSubview(replyMarkupView!)
+                replyMarkupView?.frame = replyMarkupFrame
             }
             
             replyMarkupView?.setFrameSize(replyMarkup.size.width, replyMarkup.size.height)
             replyMarkup.view = replyMarkupView
             replyMarkup.redraw()
         } else {
-            replyMarkupView?.removeFromSuperview()
-            replyMarkupView = nil
+            if let replyMarkupView = self.replyMarkupView, animated {
+                self.replyMarkupView = nil
+                replyMarkupView.layer?.animateScaleCenter(from: 1, to: 0.1, duration: 0.2, removeOnCompletion: false)
+                replyMarkupView.layer?.animateAlpha(from: 1, to: 0, duration: 0.2, removeOnCompletion: false, completion: { [weak replyMarkupView] _ in
+                    replyMarkupView?.removeFromSuperview()
+                })
+            } else {
+                replyMarkupView?.removeFromSuperview()
+                replyMarkupView = nil
+            }
         }
     }
+    
     
     
     func fillName(_ item:ChatRowItem) -> Void {
@@ -1141,25 +1300,56 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
             self.animatedView = nil
         }
         
+        let animated = animated && ((item as? ChatRowItem)?.isBubbled ?? false)
+        
         if let item = item as? ChatRowItem {
             
             renderLayoutType(item, animated: animated)
             
+
+            item.chatInteraction.add(observer: self)
+            
+            updateSelectingState(selectingMode:item.chatInteraction.presentation.selectionState != nil, item: item, needUpdateColors: false)
+        }
+        
+        super.set(item: item, animated: animated)
+        
+        if let item = item as? ChatRowItem {
             rightView.set(item:item, animated:animated)
             fillReplyIfNeeded(item.replyModel, item)
             fillName(item)
             fillForward(item)
             fillPhoto(item)
-            fillCaption(item)
-            fillReplyMarkup(item)
-            fillShareControl(item)
+            fillForward(item)
             fillScamButton(item)
             fillScamForwardButton(item)
-            item.chatInteraction.add(observer: self)
-            
-            updateSelectingState(selectingMode:item.chatInteraction.presentation.selectionState != nil, item: item, needUpdateColors: false)
+            fillPsaButton(item)
+            fillShareView(item, animated: animated)
+            fillLikeView(item, animated: animated)
+            fillReplyMarkup(item, animated: animated)
+            fillCaption(item, animated: animated)
+
+            if animated {
+                
+                let bubbleFrame = self.bubbleFrame
+                let contentFrameModifier = self.contentFrameModifier
+                
+                bubbleView.change(pos: bubbleFrame.origin, animated: animated)
+                bubbleView.change(size: bubbleFrame.size, animated: animated)
+                contentView.change(pos: contentFrameModifier.origin, animated: animated)
+                contentView.change(size: contentFrameModifier.size, animated: animated)
+                updateBackground(animated: animated)
+                
+                if rightFrame.width != rightView.frame.width && rightFrame.minX < rightView.frame.minX {
+                    rightView.setFrameOrigin(NSMakePoint(rightFrame.minX, rightView.frame.minY))
+                }
+                rightView.change(pos: rightFrame.origin, animated: animated)
+                replyView?._change(pos: replyFrame.origin, animated: animated)
+                replyMarkupView?.change(pos: replyMarkupFrame.origin, animated: animated)
+                captionView?._change(pos: captionFrame.origin, animated: animated)
+            }
         }
-        super.set(item: item, animated: animated)
+        
         rowView.needsDisplay = true
         needsLayout = true
     }
@@ -1296,13 +1486,18 @@ class ChatRowView: TableRowView, Notifable, MultipleSelectable, ViewDisplayDeleg
         
         
         if item.isBubbled && item.presentation.backgroundMode.hasWallpapaer {
-            control.set(image: item.presentation.icons.chatSwipeReplyWallpaper, for: .Normal)
+            control.set(image: item.presentation.chat.chat_reply_swipe_bubble(theme: item.presentation), for: .Normal)
+            control.autohighlight = false
             _ = control.sizeToFit()
-            control.setFrameSize(NSMakeSize(control.frame.width + 10, control.frame.height + 10))
-            control.background = item.presentation.colors.background
+            control.setFrameSize(NSMakeSize(control.frame.width + 4, control.frame.height + 4))
+            control.set(background: item.presentation.chatServiceItemColor, for: .Normal)
+            control.set(background: item.presentation.chatServiceItemColor.withAlphaComponent(0.8), for: .Highlight)
+            
+            
+            
             control.layer?.cornerRadius = control.frame.height / 2
         } else {
-            control.set(image: item.presentation.icons.chatSwipeReply, for: .Normal)
+            control.set(image: item.presentation.icons.chat_swipe_reply, for: .Normal)
             _ = control.sizeToFit()
             control.background = .clear
         }

@@ -63,6 +63,8 @@ func resolveUsername(username: String, context: AccountContext) -> Signal<Peer?,
 enum InAppSettingsSection : String {
     case themes
     case devices
+    case folders
+    case privacy
 }
 
 enum ChatInitialActionBehavior : Equatable {
@@ -75,7 +77,9 @@ enum ChatInitialAction : Equatable {
     case inputText(text: String, behavior: ChatInitialActionBehavior)
     case files(list: [String], behavior: ChatInitialActionBehavior)
     case forward(messageIds: [MessageId], text: String?, behavior: ChatInitialActionBehavior)
-    case ad
+    case ad(PromoChatListItem.Kind)
+    case source(MessageId)
+    case closeAfter(Int32)
 }
 
 
@@ -90,12 +94,17 @@ var globalLinkExecutor:TextViewInteractions {
                     execute(inapp:link)
                 }
             }
-        }, isDomainLink: { value in
+        }, isDomainLink: { value, origin in
             if let value = value as? inAppLink {
                 switch value {
                 case .external:
                     return true
                 default:
+                    if let origin = origin {
+                        if origin != value.link, !origin.isEmpty && origin != "‌" {
+                            return true
+                        }
+                    }
                     return false
                 }
             }
@@ -213,10 +222,10 @@ func copyContextText(from type: LinkType) -> String {
     }
 }
 
-func execute(inapp:inAppLink) {
+func execute(inapp:inAppLink, afterComplete: @escaping(Bool)->Void = { _ in }) {
     
     switch inapp {
-    case let .external(link,needConfirm):
+    case let .external(link, needConfirm):
         var url:String = link.trimmed
         
         var reversedUrl = String(url.reversed())
@@ -234,8 +243,11 @@ func execute(inapp:inAppLink) {
                 url = "http://" + url
             }
         }
+        let urlValue = url
         let escaped = escape(with:url)
         if let urlQueryAllowed = Optional(escaped), let url = URL(string: urlQueryAllowed) {
+            let needConfirm = needConfirm || url.host != URL(string: urlValue)?.host
+            let removePecentEncoding = url.host == URL(string: urlValue)?.host
             let success:()->Void = {
                 
                 var path = url.absoluteString
@@ -253,14 +265,15 @@ func execute(inapp:inAppLink) {
                     }
                     if let url = url {
                         NSWorkspace.shared.open(url)
+                        afterComplete(true)
                         return
                     }
                 }
-
+                afterComplete(true)
                 NSWorkspace.shared.open(url)
             }
             if needConfirm {
-                confirm(for: mainWindow, header: L10n.inAppLinksConfirmOpenExternalHeader, information: L10n.inAppLinksConfirmOpenExternalNew(url.absoluteString.removingPercentEncoding ?? url.absoluteString), okTitle: L10n.inAppLinksConfirmOpenExternalOK, successHandler: {_ in success()})
+                confirm(for: mainWindow, header: L10n.inAppLinksConfirmOpenExternalHeader, information: L10n.inAppLinksConfirmOpenExternalNew(removePecentEncoding ? (url.absoluteString.removingPercentEncoding ?? url.absoluteString) : escaped), okTitle: L10n.inAppLinksConfirmOpenExternalOK, successHandler: {_ in success()}, cancelHandler: { afterComplete(false) })
             } else {
                 success()
             }
@@ -273,6 +286,7 @@ func execute(inapp:inAppLink) {
             messageId = nil
         }
         callback(peerId, openChat, messageId, action)
+        afterComplete(true)
     case let .followResolvedName(_, username, postId, context, action, callback):
         
         if username.hasPrefix("_private_"), let range = username.range(of: "_private_") {
@@ -332,8 +346,7 @@ func execute(inapp:inAppLink) {
                     
             })
         }
-        
-        
+        afterComplete(true)
     case let .inviteBotToGroup(_, username, context, action, callback):
         let _ = showModalProgress(signal: resolvePeerByName(account: context.account, name: username) |> filter {$0 != nil} |> map{$0!} |> deliverOnMainQueue, for: context.window).start(next: { botPeerId in
             
@@ -386,10 +399,13 @@ func execute(inapp:inAppLink) {
                 callback(peerId, true, nil, nil)
             })
         })
+        afterComplete(true)
     case let .botCommand(command, interaction):
         interaction(command)
+        afterComplete(true)
     case let .hashtag(hashtag, interaction):
         interaction(hashtag)
+        afterComplete(true)
     case let .joinchat(_, hash, context, interaction):
         _ = showModalProgress(signal: joinLinkInformation(hash, account: context.account), for: context.window).start(next: { (result) in
             switch result {
@@ -401,20 +417,27 @@ func execute(inapp:inAppLink) {
                         interaction(peerId, true, nil, nil)
                     }
                 }), for: context.window)
+            case let .peek(peerId, peek):
+                 interaction(peerId, true, nil, .closeAfter(peek))
             case .invalidHash:
                 alert(for: context.window, info: tr(L10n.groupUnavailable))
             }
         })
+        afterComplete(true)
     case let .callback(param, interaction):
         interaction(param)
+        afterComplete(true)
     case let .code(param, interaction):
         interaction(param)
+        afterComplete(true)
     case let .logout(interaction):
         interaction()
+        afterComplete(true)
     case let .shareUrl(_, context, url):
         if !url.hasPrefix("@") {
             showModal(with: ShareModalController(ShareLinkObject(context, link: url)), for: context.window)
         }
+        afterComplete(true)
     case let .wallpaper(_, context, preview):
         switch preview {
         case let .gradient(top, bottom, rotation):
@@ -433,8 +456,10 @@ func execute(inapp:inAppLink) {
                 }
             })
         }
+        afterComplete(true)
     case let .stickerPack(_, reference, context, peerId):
         showModal(with: StickerPackPreviewModalController(context, peerId: peerId, reference: reference), for: context.window)
+        afterComplete(true)
     case let .confirmPhone(_, context, phone, hash):
         _ = showModalProgress(signal: requestCancelAccountResetData(network: context.account.network, hash: hash) |> deliverOnMainQueue, for: context.window).start(next: { data in
             showModal(with: cancelResetAccountController(account: context.account, phone: phone, data: data), for: context.window)
@@ -446,10 +471,12 @@ func execute(inapp:inAppLink) {
                 alert(for: context.window, info: L10n.unknownError)
             }
         })
+        afterComplete(true)
     case let .socks(_, settings, applyProxy):
         applyProxy(settings)
+        afterComplete(true)
     case .nothing:
-        break
+        afterComplete(true)
     case let .requestSecureId(_, context, value):
         if value.nonce.isEmpty {
             alert(for: context.window, info: value.isModern ? "nonce is empty" : "payload is empty")
@@ -472,6 +499,7 @@ func execute(inapp:inAppLink) {
                 updateAppAsYouWish(text: L10n.secureIdAppVersionOutdated, updateApp: true)
             }
         })
+        afterComplete(true)
     case let .applyLocalization(_, context, value):
         _ = showModalProgress(signal: requestLocalizationPreview(network: context.account.network, identifier: value) |> deliverOnMainQueue, for: context.window).start(next: { info in
             if appAppearance.language.primaryLanguage.languageCode == info.languageCode {
@@ -495,6 +523,7 @@ func execute(inapp:inAppLink) {
                 alert(for: context.window, info: L10n.localizationPreviewErrorGeneric)
             }
         })
+        afterComplete(true)
     case let .theme(_, context, name):
         _ = showModalProgress(signal: getTheme(account: context.account, slug: name), for: context.window).start(next: { value in
             if value.file == nil, let _ = value.settings {
@@ -514,12 +543,14 @@ func execute(inapp:inAppLink) {
                 alert(for: context.window, info: L10n.themeGetThemeError)
             }
         })
+        afterComplete(true)
     case let .unsupportedScheme(_, context, path):
         _ = (getDeepLinkInfo(network: context.account.network, path: path) |> deliverOnMainQueue).start(next: { info in
             if let info = info {
                updateAppAsYouWish(text: info.message, updateApp: info.updateApp)
             }
         })
+        afterComplete(true)
     case let .tonTransfer(_, context, data: data):
         if #available(OSX 10.12, *) {
 //            let _ = combineLatest(queue: .mainQueue(), walletConfiguration(postbox: context.account.postbox), TONKeychain.hasKeys(for: context.account)).start(next: { configuration, hasKeys in
@@ -556,7 +587,7 @@ func execute(inapp:inAppLink) {
 //            })
         }
     case .instantView:
-        break
+        afterComplete(true)
     case let .settings(_, context, section):
         let controller: ViewController
         switch section {
@@ -564,8 +595,13 @@ func execute(inapp:inAppLink) {
             controller = AppAppearanceViewController(context: context)
         case .devices:
             controller = RecentSessionsController(context)
+        case .folders:
+            controller = ChatListFiltersListController(context: context)
+        case .privacy:
+            controller = PrivacyAndSecurityViewController(context, initialSettings: (nil, nil), focusOnItemTag: .autoArchive)
         }
         context.sharedContext.bindings.rootNavigation().push(controller)
+        afterComplete(true)
     }
     
 }
@@ -903,8 +939,8 @@ func inApp(for url:NSString, context: AccountContext? = nil, peerId:PeerId? = ni
                 }
                 
                 if let openInfo = openInfo {
-                    if username == "iv" {
-                        return .external(link: url as String, false)
+                    if username == "iv" || username.isEmpty {
+                        return .external(link: url as String, username.isEmpty)
                     } else if let context = context {
                         return .followResolvedName(link: urlString, username: username, postId: nil, context: context, action: action, callback: openInfo)
                     }
@@ -1144,6 +1180,7 @@ func inApp(for url:NSString, context: AccountContext? = nil, peerId:PeerId? = ni
         }
        
     } else if url.hasPrefix(ton_scheme), let context = context {
+        return .external(link: url as String, false)
 //        let action = url.substring(from: ton_scheme.length)
 //        if action.hasPrefix("transfer/") {
 //            let vars = urlVars(with: url as String)

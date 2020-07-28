@@ -17,6 +17,7 @@ import AppCenter
 import AppCenterCrashes
 #endif
 
+
 #if !SHARE
 extension Account {
     var diceCache: DiceCache? {
@@ -69,6 +70,12 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
         return sharedContextPromise.get() |> take(1) |> deliverOnMainQueue
     }
 
+    
+    var passlock: Signal<Bool, NoError> {
+        return sharedContextPromise.get() |> mapToSignal {
+            return $0.notificationManager.passlocked
+        }
+    }
     
     fileprivate var contextValue: AuthorizedApplicationContext?
     private let context = Promise<AuthorizedApplicationContext?>()
@@ -181,8 +188,11 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
         Timer.scheduledTimer(timeInterval: 10, target: self, selector: #selector(saveIntermediateDate), userInfo: nil, repeats: true)
         
         
+//        let test = View()
+//        test.backgroundColor = NSColor.black.withAlphaComponent(0.87)
+//        test.frame = NSMakeRect(0, 0, leftSidebarWidth, Window.statusBarHeight)
+//        window.titleView?.addSubview(test, positioned: .below, relativeTo: window.titleView?.subviews.first)
         
-
         telegramUIDeclareEncodables()
         
         MTLogSetEnabled(UserDefaults.standard.bool(forKey: "enablelogs"))
@@ -281,7 +291,6 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
                 applyUILocalization(localization)
             }
             
-
             
             updateTheme(with: themeSettings, for: window)
             
@@ -295,7 +304,7 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
             _ = combineLatest(queue: .mainQueue(), themeSettingsView(accountManager: accountManager), backingProperties.get()).start(next: { settings, backingScale in
                 let previous = basicTheme.swap(settings)
                 if previous?.palette != settings.palette || previous?.bubbled != settings.bubbled || previous?.wallpaper != settings.wallpaper || previous?.fontSize != settings.fontSize || previousBackingScale != backingScale  {
-                    updateTheme(with: settings, for: window, animated: window.isKeyWindow && ((previous?.fontSize == settings.fontSize && previous?.palette != settings.palette) || previous?.bubbled != settings.bubbled || previous?.cloudTheme?.id != settings.cloudTheme?.id))
+                    updateTheme(with: settings, for: window, animated: window.isKeyWindow && ((previous?.fontSize == settings.fontSize && previous?.palette != settings.palette) || previous?.bubbled != settings.bubbled || previous?.cloudTheme?.id != settings.cloudTheme?.id || previous?.palette.isDark != settings.palette.isDark))
                     self.contextValue?.applyNewTheme()
                 }
                 previousBackingScale = backingScale
@@ -384,7 +393,7 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
                 }
             })
             
-            let networkArguments = NetworkInitializationArguments(apiId: ApiEnvironment.apiId, apiHash: ApiEnvironment.apiHash, languagesCategory: ApiEnvironment.language, appVersion: ApiEnvironment.version, voipMaxLayer: CallBridge.voipMaxLayer(), voipVersions: [CallBridge.voipVersion()], appData: .single(ApiEnvironment.appData), autolockDeadine: .single(nil), encryptionProvider: OpenSSLEncryptionProvider())
+            let networkArguments = NetworkInitializationArguments(apiId: ApiEnvironment.apiId, apiHash: ApiEnvironment.apiHash, languagesCategory: ApiEnvironment.language, appVersion: ApiEnvironment.version, voipMaxLayer: OngoingCallThreadLocalContext.maxLayer(), voipVersions: [OngoingCallThreadLocalContext.version()], appData: .single(ApiEnvironment.appData), autolockDeadine: .single(nil), encryptionProvider: OpenSSLEncryptionProvider())
             
             let sharedContext = SharedAccountContext(accountManager: accountManager, networkArguments: networkArguments, rootPath: rootPath, encryptionParameters: encryptionParameters, displayUpgradeProgress: displayUpgrade)
             
@@ -606,6 +615,7 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
                         context.context.isCurrent = true
                         context.applyNewTheme()
                         self.window.contentView?.addSubview(context.rootView, positioned: .below, relativeTo: self.window.contentView?.subviews.first)
+                        
                         context.runLaunchAction()
                         if let executeUrlAfterLogin = self.executeUrlAfterLogin {
                             self.executeUrlAfterLogin = nil
@@ -626,7 +636,11 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
                                 applicationUpdateUrlPrefix = nil
                             }
                             setAppUpdaterBaseDomain(applicationUpdateUrlPrefix)
+                            #if STABLE
+                            updater_resetWithUpdaterSource(.internal(context: context.context))
+                            #else
                             updater_resetWithUpdaterSource(.external(context: context.context))
+                            #endif
                             
                         }))
                         #endif
@@ -688,7 +702,15 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
                                         applicationUpdateUrlPrefix = nil
                                     }
                                     setAppUpdaterBaseDomain(applicationUpdateUrlPrefix)
+                                    #if STABLE
+                                    if let context = self.contextValue?.context {
+                                        updater_resetWithUpdaterSource(.internal(context: context))
+                                    } else {
+                                        updater_resetWithUpdaterSource(.external(context: nil))
+                                    }
+                                    #else
                                     updater_resetWithUpdaterSource(.external(context: self.contextValue?.context))
+                                    #endif
 
                                 }))
                                 #endif
@@ -782,8 +804,16 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
 
     @IBAction func checkForUpdates(_ sender: Any) {
         #if !APP_STORE
-        showModal(with: InputDataModalController(AppUpdateViewController()), for: window)
-        updater_resetWithUpdaterSource(.external(context: self.contextValue?.context))
+            showModal(with: InputDataModalController(AppUpdateViewController()), for: window)
+            #if STABLE
+                if let context = self.contextValue?.context {
+                    updater_resetWithUpdaterSource(.internal(context: context))
+                } else {
+                    updater_resetWithUpdaterSource(.external(context: nil))
+                }
+            #else
+                updater_resetWithUpdaterSource(.external(context: self.contextValue?.context))
+            #endif
         #endif
     }
     
@@ -927,7 +957,7 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
             } else if let passport = passport {
                 passport.window.makeKeyAndOrderFront(nil)
             } else {
-                window.makeKeyAndOrderFront(nil)
+               // window.makeKeyAndOrderFront(nil)
             }
             
             
@@ -970,6 +1000,10 @@ class AppDelegate: NSResponder, NSApplicationDelegate, NSUserNotificationCenterD
         window.resignMain()
     }
     
+    
+    var hasAuthorized: Bool {
+        return contextValue?.context != nil
+    }
     
     @IBAction func unhide(_ sender: Any) {
          window.makeKeyAndOrderFront(sender)

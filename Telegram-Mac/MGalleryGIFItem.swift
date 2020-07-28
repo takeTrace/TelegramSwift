@@ -14,21 +14,36 @@ import SwiftSignalKit
 import TGUIKit
 class MGalleryGIFItem: MGalleryItem {
 
+    private var mediaPlayer: MediaPlayer!
+    
     override init(_ context: AccountContext, _ entry: GalleryEntry, _ pagerSize: NSSize) {
         super.init(context, entry, pagerSize)
         
         let view = self.view
-        let pathSignal = path.get() |> map { path in
-           return AVGifData.dataFrom(path)
-        } |> distinctUntilChanged |> deliverOnMainQueue |> mapToSignal { data -> Signal<Tuple2<AVGifData?,GIFPlayerView>, NoError> in
-            return view.get() |> distinctUntilChanged |> map { view in
-                return Tuple(data, view as! GIFPlayerView)
+        
+        let fileReference = entry.fileReference(media)
+       
+        self.mediaPlayer = MediaPlayer(postbox: context.account.postbox, reference: fileReference.resourceReference(media.resource), streamable: media.isStreamable, video: true, preferSoftwareDecoding: false, enableSound: false, fetchAutomatically: false)
+        mediaPlayer.actionAtEnd = .loop(nil)
+
+        
+        disposable.set(view.get().start(next: { [weak self] view in
+            if let view = (view as? MediaPlayerView) {
+                self?.mediaPlayer.attachPlayerView(view)
             }
-        }
-        disposable.set(pathSignal.start(next: { tuple in
-            tuple._1.set(data: tuple._0)
         }))
         
+    }
+    
+    override func appear(for view: NSView?) {
+        super.appear(for: view)
+        self.mediaPlayer.play()
+    }
+    
+    override func disappear(for view: NSView?) {
+        super.disappear(for: view)
+        
+        self.mediaPlayer.pause()
     }
     
     override var status:Signal<MediaResourceStatus, NoError> {
@@ -50,6 +65,11 @@ class MGalleryGIFItem: MGalleryItem {
             }
         case .instantMedia(let media, _):
             return media.media as! TelegramMediaFile
+        case let  .photo(_, _, photo, _, _, _, _):
+            let video = photo.videoRepresentations.last!
+            let file = TelegramMediaFile(fileId: photo.imageId, partialReference: nil, resource: video.resource, previewRepresentations: photo.representations, videoThumbnails: [], immediateThumbnailData: nil, mimeType: "video/mp4", size: video.resource.size, attributes: [.Video(duration:0, size: PixelDimensions(640, 640), flags: [])])
+            
+            return file
         default:
             fatalError()
         }
@@ -62,22 +82,27 @@ class MGalleryGIFItem: MGalleryItem {
 //    }
 
     override func singleView() -> NSView {
-        let player = GIFPlayerView()
-        player.layerContentsRedrawPolicy = .duringViewResize
+        let player = MediaPlayerView(backgroundThread: true)
         return player
     }
     
     override var sizeValue: NSSize {
         if let size = media.dimensions?.size {
+            
+            var size = size
+            
+            
             return size.fitted(pagerSize)
         }
         return pagerSize
     }
     
     override func request(immediately: Bool) {
+        super.request(immediately: immediately)
+        let size = media.dimensions?.size.fitted(pagerSize) ?? sizeValue
         
         let signal:Signal<ImageDataTransformation,NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: entry.fileReference(media), scale: System.backingScale)
-        let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: sizeValue, boundingSize: sizeValue, intrinsicInsets: NSEdgeInsets())
+        let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
         let result = signal |> deliverOn(graphicsThreadPool) |> mapToThrottled { generator -> Signal<CGImage?, NoError> in
             return .single(generator.execute(arguments, generator.data)?.generateImage())
         }
@@ -90,7 +115,7 @@ class MGalleryGIFItem: MGalleryItem {
             return .never()
         })
 
-        self.image.set(result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil) } |> deliverOnMainQueue)
+        self.image.set(result |> map { GPreviewValueClass(.image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil)) } |> deliverOnMainQueue)
     
         fetch()
     }

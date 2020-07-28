@@ -59,6 +59,10 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
     private var _lockedValue:LockNotificationsData = LockNotificationsData()
     private let _passlock = Promise<Bool>()
 
+    var passlocked: Signal<Bool, NoError> {
+        return _passlock.get()
+    }
+
     
     private func updateLocked(_ f:(LockNotificationsData) -> LockNotificationsData) {
         _lockedValue = f(_lockedValue)
@@ -226,6 +230,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
     }
     
     private var snoofEnabled: Bool = true
+    private var requestUserAttention: Bool = false
     
     func startNotifyListener(with account: Account, primary: Bool) {
         let screenLocked = self.screenLocked
@@ -234,7 +239,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
         disposableDict.set((account.stateManager.notificationMessages |> mapToSignal { messages -> Signal<([([Message], PeerGroupId)], InAppNotificationSettings), NoError> in
             return appNotificationSettings(accountManager: self.accountManager) |> take(1) |> mapToSignal { inAppSettings -> Signal<([([Message], PeerGroupId)], InAppNotificationSettings), NoError> in
                 self.snoofEnabled = inAppSettings.showNotificationsOutOfFocus
-                
+                self.requestUserAttention = inAppSettings.requestUserAttention
                 if inAppSettings.enabled && inAppSettings.muteUntil < Int32(Date().timeIntervalSince1970) {
                     
                     return .single((messages.filter({$0.2 || ($0.0.isEmpty || $0.0[0].wasScheduled)}).map {($0.0, $0.1)}, inAppSettings))
@@ -313,7 +318,7 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                            
                            
                             
-                            var text = chatListText(account: account, for: message).string.nsstring
+                            var text = chatListText(account: account, for: message, applyUserName: true).string.nsstring
                             var subText:String?
                             if text.contains("\n") {
                                 let parts = text.components(separatedBy: "\n")
@@ -379,13 +384,14 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
                             dict["peer.id"] =  message.id.peerId.id
                             dict["peer.namespace"] =  message.id.peerId.namespace
                             dict["groupId"] = groupId.rawValue
-                            dict["timestamp"] = Int32(Date().timeIntervalSince1970)
-                            dict["accountId"] = account.id.int64
                             
                             if screenIsLocked {
                                 dict = [:]
                             }
                             
+                            dict["accountId"] = account.id.int64
+                            dict["timestamp"] = Int32(Date().timeIntervalSince1970)
+
                             alsoNotified.insert(message.id)
                             
                             notification.userInfo = dict
@@ -399,6 +405,12 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
             }), forKey: account.id)
     }
 
+    func userNotificationCenter(_ center: NSUserNotificationCenter, didDeliver notification: NSUserNotification) {
+        if requestUserAttention && !window.isKeyWindow {
+            NSApp.requestUserAttention(.informationalRequest)
+        }
+    }
+    
     func userNotificationCenter(_ center: NSUserNotificationCenter, shouldPresent notification: NSUserNotification) -> Bool {
         guard let id = notification.userInfo?["accountId"] as? Int64 else {
             return false
@@ -406,12 +418,16 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
         let accountId = AccountRecordId(rawValue: id)
         
         if accountId != self.activeAccounts.primary?.id {
+            
             return true
         }
         
         let wasScheduled = notification.userInfo?["wasScheduled"] as? Bool ?? false
         
-        return !snoofEnabled || !NSApp.isActive || wasScheduled
+        let result = !snoofEnabled || !window.isKeyWindow || wasScheduled
+        
+        
+        return result
     }
     
     
@@ -452,6 +468,10 @@ final class SharedNotificationManager : NSObject, NSUserNotificationCenterDelega
             } else {
                 self.bindings.navigateToChat(account, messageId.peerId)
             }
+        } else {
+            center.removeDeliveredNotification(notification)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
     

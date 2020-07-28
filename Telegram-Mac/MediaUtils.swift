@@ -291,18 +291,28 @@ func chatGalleryPhoto(account: Account, imageReference: ImageMediaReference, toR
             options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailFromImageAlways as String)
             options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCache as String)
             options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCacheImmediately as String)
+            options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailWithTransform as String)
 
+            
+            
             if let fullSizeData = fullSizeData {
                 if data.fullSizeComplete {
                     if let imageSource = CGImageSourceCreateWithData(fullSizeData as CFData, options), let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
-                        return image
+                        return generateImage(image.size, contextGenerator: { (size, ctx) in
+                            ctx.setFillColor(theme.colors.transparentBackground.cgColor)
+                            ctx.fill(NSMakeRect(0, 0, size.width, size.height))
+                            ctx.draw(image, in: NSMakeRect(0, 0, size.width, size.height))
+                        })
+                        
                     }
                     
                 }
             }
             
+            options.setValue(150 as NSNumber, forKey: kCGImageSourceThumbnailMaxPixelSize as String)
+
             var thumbnailImage: CGImage?
-            if let thumbnailData = thumbnailData, let imageSource = CGImageSourceCreateWithData(thumbnailData as CFData, options), let image = CGImageSourceCreateImageAtIndex(imageSource, 0, options as CFDictionary) {
+            if let thumbnailData = thumbnailData, let imageSource = CGImageSourceCreateWithData(thumbnailData as CFData, options), let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
                 thumbnailImage = image
             }
             
@@ -322,7 +332,7 @@ func chatGalleryPhoto(account: Account, imageReference: ImageMediaReference, toR
                 
             }
             return generateImage(fittedSize, contextGenerator: { (size, ctx) in
-                ctx.setFillColor(theme.colors.background.cgColor)
+                ctx.setFillColor(theme.colors.transparentBackground.cgColor)
                 ctx.fill(NSMakeRect(0, 0, size.width, size.height))
             })
             
@@ -330,8 +340,8 @@ func chatGalleryPhoto(account: Account, imageReference: ImageMediaReference, toR
     }
 }
 
-func chatMessagePhoto(account: Account, imageReference: ImageMediaReference, toRepresentationSize:NSSize = NSMakeSize(1280, 1280), peer: Peer? = nil, scale:CGFloat, synchronousLoad: Bool = false) -> Signal<ImageDataTransformation, NoError> {
-    let signal = chatMessagePhotoDatas(postbox: account.postbox, imageReference: imageReference, fullRepresentationSize: toRepresentationSize, synchronousLoad: synchronousLoad, peer: peer)
+func chatMessagePhoto(account: Account, imageReference: ImageMediaReference, toRepresentationSize:NSSize = NSMakeSize(1280, 1280), peer: Peer? = nil, scale:CGFloat, synchronousLoad: Bool = false, autoFetchFullSize: Bool = false) -> Signal<ImageDataTransformation, NoError> {
+    let signal = chatMessagePhotoDatas(postbox: account.postbox, imageReference: imageReference, fullRepresentationSize: toRepresentationSize, autoFetchFullSize: autoFetchFullSize, synchronousLoad: synchronousLoad, peer: peer)
     
     return signal |> map { data in
         return ImageDataTransformation(data: data, execute: { arguments, data in
@@ -357,8 +367,8 @@ func chatMessagePhoto(account: Account, imageReference: ImageMediaReference, toR
                     options.setValue(max(fittedSize.width * context.scale, fittedSize.height * context.scale) as NSNumber, forKey: kCGImageSourceThumbnailMaxPixelSize as String)
                     options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCache as String)
 
-                    //   options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailFromImageAlways as String)
-                    if let imageSource = CGImageSourceCreateWithData(fullSizeData as CFData, nil), let image = CGImageSourceCreateImageAtIndex(imageSource, 0, options as CFDictionary) {
+                       options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailFromImageAlways as String)
+                    if let imageSource = CGImageSourceCreateWithData(fullSizeData as CFData, nil), let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
                         fullSizeImage = image
                     }
                     
@@ -376,9 +386,9 @@ func chatMessagePhoto(account: Account, imageReference: ImageMediaReference, toR
             
             let options = NSMutableDictionary()
             options[kCGImageSourceShouldCache as NSString] = false as NSNumber
-            
+            options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailFromImageAlways as String)
             var thumbnailImage: CGImage?
-            if let thumbnailData = thumbnailData, let imageSource = CGImageSourceCreateWithData(thumbnailData as CFData, options), let image = CGImageSourceCreateImageAtIndex(imageSource, 0, options) {
+            if let thumbnailData = thumbnailData, let imageSource = CGImageSourceCreateWithData(thumbnailData as CFData, options), let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options) {
                 thumbnailImage = image
             }
             
@@ -924,10 +934,10 @@ public func chatMessageAnimatedSticker(postbox: Postbox, file: TelegramMediaFile
 
 
 
-public func chatMessageDiceSticker(postbox: Postbox, file: TelegramMediaFile, value: String, scale: CGFloat, size: NSSize, synchronousLoad: Bool = false) -> Signal<ImageDataTransformation, NoError> {
+public func chatMessageDiceSticker(postbox: Postbox, file: TelegramMediaFile, emoji: String, value: String, scale: CGFloat, size: NSSize, synchronousLoad: Bool = false) -> Signal<ImageDataTransformation, NoError> {
     
     
-    let signal: Signal<ImageRenderData, NoError> = postbox.mediaBox.cachedResourceRepresentation(file.resource, representation: CachedDiceRepresentation(value: value, size: size), complete: false, fetch: true, attemptSynchronously: synchronousLoad) |> map { data in
+    let signal: Signal<ImageRenderData, NoError> = postbox.mediaBox.cachedResourceRepresentation(file.resource, representation: CachedDiceRepresentation(emoji: emoji, value: value, size: size), complete: true, fetch: true, attemptSynchronously: synchronousLoad) |> map { data in
         if data.complete {
             return ImageRenderData(nil, try? Data(contentsOf: URL(fileURLWithPath: data.path)), true)
         } else {
@@ -1286,7 +1296,11 @@ func chatWebpageSnippetPhoto(account: Account, imageReference: ImageMediaReferen
 
 func chatMessagePhotoStatus(account: Account, photo: TelegramMediaImage, approximateSynchronousValue: Bool = false) -> Signal<MediaResourceStatus, NoError> {
     if let largestRepresentation = photo.representationForDisplayAtSize(PixelDimensions(1280, 1280)) {
-        return account.postbox.mediaBox.resourceStatus(largestRepresentation.resource, approximateSynchronousValue: approximateSynchronousValue)
+        if largestRepresentation.resource is LocalFileReferenceMediaResource {
+            return .single(.Local)
+        } else {
+            return account.postbox.mediaBox.resourceStatus(largestRepresentation.resource, approximateSynchronousValue: approximateSynchronousValue)
+        }
     } else {
         return .never()
     }
@@ -1407,7 +1421,7 @@ private func chatMessageVideoDatas(postbox: Postbox, fileReference: FileMediaRef
                         thumbnailDisposable = postbox.mediaBox.resourceData(smallestRepresentation.resource, attemptSynchronously: synchronousLoad).start(next: { next in
                             subscriber.putNext(ImageRenderData(!next.complete ? decodedThumbnailData : try? Data(contentsOf: URL(fileURLWithPath: next.path), options: []), nil, !next.complete))
                         }, error: subscriber.putError, completed: subscriber.putCompletion)
-                    } else {
+                    } else if decodedThumbnailData == nil {
                         subscriber.putNext(ImageRenderData(nil, nil, true))
                     }
                    
@@ -1608,7 +1622,7 @@ func chatSecretMessageVideo(account: Account, fileReference: FileMediaReference,
                 }
             }
             
-            context.withContext { c in
+            context.withContext({ c in
                 c.setBlendMode(.copy)
                 if arguments.imageSize.width < arguments.boundingSize.width || arguments.imageSize.height < arguments.boundingSize.height {
                     //c.setFillColor(NSColor(white: 0.0, alpha: 0.4).cgColor)
@@ -1627,7 +1641,7 @@ func chatSecretMessageVideo(account: Account, fileReference: FileMediaReference,
                 if !arguments.insets.right.isEqual(to: 0.0) {
                     c.clear(CGRect(origin: CGPoint(x: context.size.width - arguments.insets.right, y: 0.0), size: CGSize(width: arguments.insets.right, height: context.size.height)))
                 }
-            }
+            })
             
             addCorners(context, arguments: arguments, scale: scale)
             
@@ -2430,11 +2444,14 @@ func chatMessageImageFile(account: Account, fileReference: FileMediaReference, p
             
             if let fullSizeData = data.fullSizeData {
                 let options = NSMutableDictionary()
+               // options.setValue(max(fittedSize.width * 3, fittedSize.height * 3) as NSNumber, forKey: kCGImageSourceThumbnailMaxPixelSize as String)
                 options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailFromImageAlways as String)
+                options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCache as String)
+                options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCacheImmediately as String)
                 options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailWithTransform as String)
-                options[kCGImageSourceShouldCache as NSString] = false as NSNumber
+
                 if let imageSource = CGImageSourceCreateWithData(fullSizeData as CFData, options) {
-                    if let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options) {
+                    if let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary) {
                         fullSizeImage = image
                     } else if let image = CGImageSourceCreateImageAtIndex(imageSource, 0, options) {
                         fullSizeImage = image
@@ -2443,11 +2460,15 @@ func chatMessageImageFile(account: Account, fileReference: FileMediaReference, p
             }
             
             let options = NSMutableDictionary()
-            options[kCGImageSourceShouldCache as NSString] = false as NSNumber
+          //  options.setValue(max(fittedSize.width * 3, fittedSize.height * 3) as NSNumber, forKey: kCGImageSourceThumbnailMaxPixelSize as String)
+            options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailFromImageAlways as String)
+            options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCache as String)
+            options.setValue(false as NSNumber, forKey: kCGImageSourceShouldCacheImmediately as String)
+            options.setValue(true as NSNumber, forKey: kCGImageSourceCreateThumbnailWithTransform as String)
 
             
             var thumbnailImage: CGImage?
-            if let thumbnailData = data.thumbnailData, let imageSource = CGImageSourceCreateWithData(thumbnailData as CFData, options), let image = CGImageSourceCreateImageAtIndex(imageSource, 0, options) {
+            if let thumbnailData = data.thumbnailData, let imageSource = CGImageSourceCreateWithData(thumbnailData as CFData, options), let image = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options) {
                 thumbnailImage = image
             }
             

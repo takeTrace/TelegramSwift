@@ -86,13 +86,17 @@ open class NavigationHeader {
                     }
                     CATransaction.begin()
                     let completion = navigation.controller.navigationHeaderDidNoticeAnimation(height, 0, animated)
-                    view.change(pos: NSMakePoint(0, inset), animated: animated, completion: { [weak navigation] completed in
-                        if let navigation = navigation, completed {
-                            navigation.controller.view.frame = NSMakeRect(0, contentInset, navigation.controller.frame.width, navigation.frame.height - contentInset)
-                            navigation.controller.view.needsLayout = true
-                            completion()
-                        }
+                    
+                    let animator = animated ? view.animator() : view
+                    animator.setFrameOrigin(NSMakePoint(0, inset))
+
+                    NSAnimationContext.runAnimationGroup({ ctx in
+                        navigation.controller.updateFrame(NSMakeRect(0, contentInset, navigation.controller.frame.width, navigation.frame.height - contentInset), animated: animated)
+                    }, completionHandler: {
+                        completion()
                     })
+                   // navigation.controller.view.needsLayout = true
+                    
                     CATransaction.commit()
                 }
             }))
@@ -112,12 +116,14 @@ open class NavigationHeader {
             CATransaction.begin()
             let completion = navigation.controller.navigationHeaderDidNoticeAnimation(0, height, animated)
             if animated {
-                view.change(pos: NSMakePoint(0, navigation.controller.bar.height - height), animated: animated, removeOnCompletion: true, completion: { [weak self] completed in
-                    if completed {
-                        self?._view?.removeFromSuperview()
-                        self?._view = nil
-                        completion()
-                    }
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    let animator = animated ? view.animator() : view
+                    animator.setFrameOrigin(NSMakePoint(0, navigation.controller.bar.height - height))
+                    
+                }, completionHandler: { [weak view, weak self] in
+                    view?.removeFromSuperview()
+                    self?._view = nil
+                    completion()
                 })
             } else {
                 view.removeFromSuperview()
@@ -129,8 +135,7 @@ open class NavigationHeader {
             if let additionalHeader = additionalHeader, additionalHeader.needShown  {
                 inset += additionalHeader.height
             }
-            navigation.controller.view.setFrameSize(NSMakeSize(navigation.controller.frame.width, navigation.frame.height - inset))
-            navigation.controller.view.setFrameOrigin(NSMakePoint(0, inset))
+            navigation.controller.updateFrame(CGRect(origin: NSMakePoint(0, inset), size: NSMakeSize(navigation.controller.frame.width, navigation.frame.height - inset)), animated: animated)
         }
         
     }
@@ -155,16 +160,17 @@ public class CallNavigationHeader : NavigationHeader {
                     let contentInset = navigation.controller.bar.height + height
                     navigation.containerView.addSubview(view, positioned: .above, relativeTo: navigation.controller.view)
                     
-                    navigation.navigationBar.change(pos: NSMakePoint(0, height), animated: animated)
+                    let navigationBar = animated ? navigation.navigationBar.animator() : navigation.navigationBar
                     
-                    self.simpleHeader?.view.change(pos: NSMakePoint(0, height + navigation.controller.bar.height), animated: animated)
+                    navigationBar.setFrameOrigin(NSMakePoint(0, height))
                     
-                    view.change(pos: NSMakePoint(0, 0), animated: animated, completion: { [weak navigation] completed in
-                        if let navigation = navigation, completed {
-                            navigation.controller.view.frame = NSMakeRect(0, contentInset, navigation.controller.frame.width, navigation.frame.height - contentInset)
-                            navigation.controller.view.needsLayout = true
-                        }
-                    })
+                    let simple = animated ? self.simpleHeader?.view.animator() : self.simpleHeader?.view
+                    simple?.setFrameOrigin(NSMakePoint(0, height + navigation.controller.bar.height))
+                    
+                    let headerView = animated ? view.animator() : view
+                    
+                    headerView.setFrameOrigin(NSMakePoint(0, 0))
+                    navigation.controller.updateFrame(NSMakeRect(0, contentInset, navigation.controller.frame.width, navigation.frame.height - contentInset), animated: animated)
                     
                 }
             }))
@@ -182,11 +188,11 @@ public class CallNavigationHeader : NavigationHeader {
         
         if let navigation = navigation {
             if animated {
-                view.change(pos: NSMakePoint(0, -height), animated: animated, removeOnCompletion: false, completion: { [weak self] completed in
-                    if completed {
-                        self?._view?.removeFromSuperview()
-                        self?._view = nil
-                    }
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    view.animator().setFrameOrigin(NSMakePoint(0, -height))
+                }, completionHandler: { [weak view, weak self] in
+                    view?.removeFromSuperview()
+                    self?._view = nil
                 })
             } else {
                 view.removeFromSuperview()
@@ -194,12 +200,13 @@ public class CallNavigationHeader : NavigationHeader {
             }
             
             if let header = simpleHeader, header.needShown {
-                header.view.change(pos: NSMakePoint(0, navigation.controller.bar.height), animated: animated)
+                let headerView = animated ? header.view.animator() : header.view
+                headerView.setFrameOrigin(NSMakePoint(0, navigation.controller.bar.height))
             }
             
-            navigation.navigationBar.change(pos: NSZeroPoint, animated: animated)
-            navigation.controller.view.frame = NSMakeRect(0, navigation.controller.bar.height, navigation.controller.frame.width, navigation.frame.height - navigation.controller.bar.height)
-            navigation.controller.view.needsLayout = true
+            let navigationBar = animated ? navigation.navigationBar.animator() : navigation.navigationBar
+            navigationBar.setFrameOrigin(.zero)
+            navigation.controller.updateFrame(NSMakeRect(0, navigation.controller.bar.height, navigation.controller.frame.width, navigation.frame.height - navigation.controller.bar.height), animated: animated)
         }
         
     }
@@ -495,11 +502,54 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
 
     }
     
+    var barInset: CGFloat {
+        var barInset:CGFloat = 0
+        if let header = callHeader, header.needShown {
+            barInset += header.height
+        } else if let header = undoHeader, header.needShown {
+            barInset += header.height
+        }
+        return barInset
+    }
+    
+    public func swapNavigationBar(leftView: BarView?, centerView: BarView?, rightView: BarView?, animation: NavigationBarSwapAnimation) {
+        
+        navigationBar.frame = NSMakeRect(0, self.navigationBar.frame.minY, containerView.frame.width, controller.bar.height)
+        
+        if let leftView = leftView {
+            navigationBar.switchLeftView(leftView, animation: animation)
+        }
+        if let centerView = centerView {
+            navigationBar.switchCenterView(centerView, animation: animation)
+        }
+        if let rightView = rightView {
+            navigationBar.switchRightView(rightView, animation: animation)
+        }
+    }
+    
+    var containerSize: NSSize {
+        return frame.size
+    }
+    
     open override func viewDidResized(_ size: NSSize) {
         super.viewDidResized(size)
-        containerView.frame = bounds
-        navigationBar.frame = NSMakeRect(0, navigationBar.frame.minY, containerView.frame.width, controller.bar.height)
+        containerView.frame = NSMakeRect(0, 0, containerSize.width, containerSize.height)
+        navigationBar.frame = NSMakeRect(0, navigationBar.frame.minY, containerSize.width, controller.bar.height)
         navigationRightBorder.frame = NSMakeRect(size.width - .borderSize, 0, .borderSize, navigationBar.frame.height)
+        
+        if let header = callHeader {
+            header.view.setFrameSize(NSMakeSize(containerSize.width, header.height))
+        }
+        if let header = header {
+            header.view.setFrameSize(NSMakeSize(containerSize.width, header.height))
+        }
+        if let header = undoHeader {
+            header.view.setFrameSize(NSMakeSize(containerSize.width, header.height))
+        }
+        
+        if controller.isLoaded() {
+            controller.frame = NSMakeRect(0, barInset + controller.bar.height, containerSize.width, containerSize.height - barInset - controller.bar.height)
+        }
     }
     
     public func cancelCurrentController() {
@@ -593,6 +643,10 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
       
 
         guard let window = self.window else {return}
+        if style == .none {
+            window.abortSwiping()
+        }
+        
         
         let previous:ViewController = self.controller;
         controller.navigationController = self
@@ -611,7 +665,7 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
             return;
         }
         
-        controller.view.disableHierarchyDynamicContent()
+        
         
         var contentInset = controller.bar.height
 
@@ -630,10 +684,6 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
         let animatePosBar: Bool = controller.bar.height != previous.bar.height && style != .none
         self.navigationBar.frame = NSMakeRect(0, barInset, containerView.frame.width, animatePosBar && controller.bar.height == 0 ? previous.bar.height : controller.bar.height)
         
-        if !animatePosBar {
-            var bp: Int = 0
-            bp += 1
-        }
         
         
         if let header = header, header.needShown {
@@ -677,6 +727,8 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
         switch style {
         case .push:
             
+            controller.view.disableHierarchyDynamicContent()
+            
             previous.viewWillDisappear(true);
             controller.viewWillAppear(true);
             
@@ -698,6 +750,8 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
             navigationRightBorder.frame = NSMakeRect(frame.width - .borderSize, 0, .borderSize, frame.height)
             
         case .pop:
+            
+            controller.view.disableHierarchyDynamicContent()
             
             previous.viewWillDisappear(true);
             controller.viewWillAppear(true);
@@ -748,7 +802,6 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
             navigationBar.frame = NSMakeRect(0, barInset, controller.frame.width, controller.bar.height)
             containerView.addSubview(navigationBar)
             
-            controller.view.restoreHierarchyDynamicContent()
 
             
             reloadHeaders()
@@ -781,7 +834,6 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
         
         navigationBar.removeFromSuperview()
         containerView.addSubview(navigationBar)
-        
         reloadHeaders()
         
        
@@ -987,13 +1039,16 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
     open override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        self.window?.add(swipe: { [weak self] direction -> SwipeHandlerResult in
+        self.window?.add(swipe: { [weak self] direction, animated -> SwipeHandlerResult in
             guard let `self` = self, self.controller.view.layer?.animationKeys() == nil, let window = self.window else {return .failed}
             
             if let view = window.contentView!.hitTest(window.contentView!.convert(window.mouseLocationOutsideOfEventStream, from: nil))?.superview {
                 if view is HorizontalRowView || view.superview is HorizontalRowView {
                     return .failed
                 }
+            }
+            if hasPopover(window) {
+                return .failed
             }
             
             switch direction {
@@ -1028,7 +1083,6 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
                     return .success(previous)
                 case let .swiping(delta, previous):
                     
-                    
                     let nPosition = min(max(0, delta), self.containerView.frame.width)
                     self.controller.view._change(pos: NSMakePoint(nPosition, self.controller.view.frame.minY), animated: false)
                     let previousStart = -round(NSWidth(self.containerView.frame)/3.0)
@@ -1054,22 +1108,22 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
                 case let .failed(_, previous):
                     //   CATransaction.begin()
                     let animationStyle = previous.animationStyle
-                    self.controller.view._change(pos: NSMakePoint(0, self.controller.frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function)
-                    self.containerView.subviews[1]._change(pos: NSMakePoint(-round(self.containerView.frame.width / 3), self.containerView.subviews[1].frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak self, weak previous] completed in
+                    self.controller.view._change(pos: NSMakePoint(0, self.controller.frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function)
+                    self.containerView.subviews[1]._change(pos: NSMakePoint(-round(self.containerView.frame.width / 3), self.containerView.subviews[1].frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak self, weak previous] completed in
                         if completed {
                             self?.containerView.subviews[1].removeFromSuperview()
                             self?.controller.removeBackgroundCap()
                             previous?.removeBackgroundCap()
                         }
                     })
-                    self.shadowView.change(pos: NSMakePoint(-self.shadowView.frame.width, self.shadowView.frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak self] completed in
+                    self.shadowView.change(pos: NSMakePoint(-self.shadowView.frame.width, self.shadowView.frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak self] completed in
                         self?.shadowView.removeFromSuperview()
                     })
-                    self.shadowView.change(opacity: 1, duration: animationStyle.duration, timingFunction: animationStyle.function)
+                    self.shadowView.change(opacity: 1, animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function)
                     if previous.bar.has {
                         self.navigationBar.moveViews(left: previous.leftBarView, center: previous.centerBarView, right: previous.rightBarView, direction: direction, percent: 0, animationStyle: animationStyle)
                     } else {
-                        self.navigationBar.change(pos: NSMakePoint(0, self.navigationBar.frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function)
+                        self.navigationBar.change(pos: NSMakePoint(0, self.navigationBar.frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function)
                     }
                     self.lock = false
                     //  CATransaction.commit()
@@ -1128,13 +1182,13 @@ open class NavigationViewController: ViewController, CALayerDelegate,CAAnimation
                     var _new:ViewController? = new
                     
                     
-                    _new?.view._change(pos: NSMakePoint(self.containerView.frame.width, self.controller.frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function)
-                    self.containerView.subviews[1]._change(pos: NSMakePoint(0, self.containerView.subviews[1].frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak new, weak self] completed in
+                    _new?.view._change(pos: NSMakePoint(self.containerView.frame.width, self.controller.frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function)
+                    self.containerView.subviews[1]._change(pos: NSMakePoint(0, self.containerView.subviews[1].frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak new, weak self] completed in
                         self?.controller.removeBackgroundCap()
                         new?.view.removeFromSuperview()
                         _new = nil
                     })
-                    self.shadowView.change(pos: NSMakePoint(self.containerView.frame.width, self.shadowView.frame.minY), animated: true, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak self] completed in
+                    self.shadowView.change(pos: NSMakePoint(self.containerView.frame.width, self.shadowView.frame.minY), animated: animated, duration: animationStyle.duration, timingFunction: animationStyle.function, completion: { [weak self] completed in
                         self?.shadowView.removeFromSuperview()
                     })
                     self.shadowView.change(opacity: 1, duration: animationStyle.duration, timingFunction: animationStyle.function)

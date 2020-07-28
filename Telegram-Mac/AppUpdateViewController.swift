@@ -86,6 +86,8 @@ private var driver:SUBasicUpdateDriver?
 private let host = SUHost(bundle: Bundle.main)
 
 func updateApplication(sharedContext: SharedAccountContext) {
+
+    
     let state = stateValue.with {$0.loadingState}
     switch state {
     case let .readyToInstall(item):
@@ -216,7 +218,7 @@ private func appUpdateEntries(state: AppUpdateState) -> [InputDataEntry] {
     
         let text = "**" + item.versionTitle + "**" + "\n" + item.updateText
         entries.append(InputDataEntry.custom(sectionId: sectionId, index: index, value: .none, identifier: InputDataIdentifier(item.fileURL.path), equatable: nil, item: { initialSize, stableId in
-            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, textColor: theme.colors.grayText, fontSize: 13, isTextSelectable: true, viewType: .textTopItem)
+            return GeneralTextRowItem(initialSize, stableId: stableId, text: text, textColor: theme.colors.listGrayText, fontSize: 13, isTextSelectable: true, viewType: .textTopItem)
         }))
         index += 1
     }

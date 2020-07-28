@@ -14,14 +14,22 @@ import SyncCore
 import TGUIKit
 import SyncCore
 
+extension AutoremoveTimeoutMessageAttribute : Equatable {
+    public static func == (lhs: AutoremoveTimeoutMessageAttribute, rhs: AutoremoveTimeoutMessageAttribute) -> Bool {
+        return lhs.timeout == rhs.timeout && lhs.countdownBeginTime == rhs.countdownBeginTime && lhs.associatedMessageIds == rhs.associatedMessageIds
+    }
+    
+    
+}
+
 final class ChatVideoAutoplayView {
     let mediaPlayer: MediaPlayer
     let view: MediaPlayerView
     
     fileprivate var playTimer: SwiftSignalKit.Timer?
-    
-    private var timer: SwiftSignalKit.Timer? = nil
     var status: MediaPlayerStatus?
+
+    private var timer: SwiftSignalKit.Timer? = nil
     
     init(mediaPlayer: MediaPlayer, view: MediaPlayerView) {
         self.mediaPlayer = mediaPlayer
@@ -173,6 +181,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
                 view.addSubview(pView)
             }
         }
+        self.autoplayVideoView?.mediaPlayer.seek(timestamp: 0)
     }
     
     func removeNotificationListeners() {
@@ -189,6 +198,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
         mediaPlayerStatusDisposable.dispose()
         partDisposable.dispose()
     }
+    
     
     @objc func updatePlayerIfNeeded() {
         let accept = window != nil && window!.isKeyWindow && !NSIsEmptyRect(visibleRect) && !self.isDynamicContentLocked
@@ -209,6 +219,8 @@ class ChatInteractiveContentView: ChatMediaContentView {
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didBecomeKeyNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didResignKeyNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.boundsDidChangeNotification, object: table?.clipView)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.boundsDidChangeNotification, object: self)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.frameDidChangeNotification, object: table?.view)
         } else {
             removeNotificationListeners()
         }
@@ -221,9 +233,9 @@ class ChatInteractiveContentView: ChatMediaContentView {
     
     override func viewDidMoveToWindow() {
         updateListeners()
-        updatePlayerIfNeeded()
-        
-
+        DispatchQueue.main.async { [weak self] in
+            self?.updatePlayerIfNeeded()
+        }
     }
 
     override func viewDidMoveToSuperview() {
@@ -273,7 +285,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
         
         switch status {
         case let .Fetching(_, progress):
-            let current = String.prettySized(with: Int(Float(file.elapsedSize) * progress), afterDot: 1, removeToken: true)
+            let current = String.prettySized(with: Int(Float(file.elapsedSize) * progress), afterDot: 1)
             var size = "\(current) / \(String.prettySized(with: file.elapsedSize))"
             if (maxWidth < 100 && parent?.groupingKey != nil) || file.elapsedSize == 0 {
                 size = "\(Int(progress * 100))%"
@@ -346,6 +358,10 @@ class ChatInteractiveContentView: ChatMediaContentView {
         } else {
             return false
         }
+        
+        if let autoremoveAttribute = parent?.autoremoveAttribute, autoremoveAttribute.timeout <= 60 {
+           return false
+        }
 
         if let media = media as? TelegramMediaFile, let parameters = self.parameters {
             return (media.isStreamable || authenticFetchStatus == .Local) && (autoDownload || authenticFetchStatus == .Local) && parameters.autoplay && (parent?.groupingKey == nil || self.frame.width == superview?.frame.width)
@@ -354,7 +370,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
     }
     
     var blurBackground: Bool {
-        return (parent != nil && parent?.groupingKey == nil)
+        return (parent != nil && parent?.groupingKey == nil) || parent == nil
     }
 
 
@@ -365,7 +381,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
         let versionUpdated = parent?.stableVersion != self.parent?.stableVersion
         
         
-        let mediaUpdated = self.media == nil || !media.isSemanticallyEqual(to: self.media!) || versionUpdated
+        let mediaUpdated = self.media == nil || !media.isSemanticallyEqual(to: self.media!) || (parent?.autoremoveAttribute != self.parent?.autoremoveAttribute)
         if mediaUpdated {
             self.autoplayVideoView = nil
         }
@@ -398,6 +414,17 @@ class ChatInteractiveContentView: ChatMediaContentView {
                 bottomRightRadius = bottomRightRadius * 3 + 2
             }
         }
+        
+        var dimensions: NSSize = size
+        
+        if let image = media as? TelegramMediaImage {
+            dimensions = image.representationForDisplayAtSize(PixelDimensions(size))?.dimensions.size ?? size
+        } else if let file = media as? TelegramMediaFile {
+            dimensions = file.dimensions?.size ?? size
+        }
+        
+        let arguments = TransformImageArguments(corners: ImageCorners(topLeft: .Corner(topLeftRadius), topRight: .Corner(topRightRadius), bottomLeft: .Corner(bottomLeftRadius), bottomRight: .Corner(bottomRightRadius)), imageSize: blurBackground ? dimensions.aspectFitted(size) : dimensions.aspectFilled(size), boundingSize: size, intrinsicInsets: NSEdgeInsets(), resizeMode: blurBackground ? .blurBackground : .none)
+
 
 
         var updateImageSignal: Signal<ImageDataTransformation, NoError>?
@@ -405,7 +432,6 @@ class ChatInteractiveContentView: ChatMediaContentView {
         
         if mediaUpdated /*mediaUpdated*/ {
             
-            var dimensions: NSSize = size
             
             if let image = media as? TelegramMediaImage {
                 
@@ -434,6 +460,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
                 }
             
             } else if let file = media as? TelegramMediaFile {
+                
                 
                 let fileReference = parent != nil ? FileMediaReference.message(message: MessageReference(parent!), media: file) : FileMediaReference.standalone(media: file)
                 
@@ -465,22 +492,29 @@ class ChatInteractiveContentView: ChatMediaContentView {
                             if let pendingStatus = pendingStatus.0 {
                                 return (.Fetching(isActive: true, progress: pendingStatus.progress), .Fetching(isActive: true, progress: pendingStatus.progress))
                             } else {
+                                if file.isStreamable && parent.id.peerId.namespace != Namespaces.Peer.SecretChat {
+                                    return (.Local, resourceStatus)
+                                }
                                 return (resourceStatus, resourceStatus)
                             }
                     } |> deliverOnMainQueue
                 } else {
-                    updatedStatusSignal = chatMessageFileStatus(account: context.account, file: file, approximateSynchronousValue: approximateSynchronousValue) |> deliverOnMainQueue |> map { [weak parent, weak file] status in
-                        if let parent = parent, let file = file {
-                            if file.isStreamable && parent.id.peerId.namespace != Namespaces.Peer.SecretChat {
-                                return (.Local, status)
+                    if file.resource is LocalFileVideoMediaResource {
+                        updatedStatusSignal = .single((.Local, .Local))
+                    } else {
+                        updatedStatusSignal = chatMessageFileStatus(account: context.account, file: file, approximateSynchronousValue: approximateSynchronousValue) |> deliverOnMainQueue |> map { [weak parent, weak file] status in
+                            if let parent = parent, let file = file {
+                                if file.isStreamable && parent.id.peerId.namespace != Namespaces.Peer.SecretChat {
+                                    return (.Local, status)
+                                }
                             }
+                            return (status, status)
                         }
-                        return (status, status)
                     }
+                    
                 }
             }
             
-            let arguments = TransformImageArguments(corners: ImageCorners(topLeft: .Corner(topLeftRadius), topRight: .Corner(topRightRadius), bottomLeft: .Corner(bottomLeftRadius), bottomRight: .Corner(bottomRightRadius)), imageSize: blurBackground ? dimensions.aspectFitted(size) : dimensions.aspectFilled(size), boundingSize: size, intrinsicInsets: NSEdgeInsets(), resizeMode: blurBackground ? .blurBackground : .none)
             
             
             self.image.setSignal(signal: cachedMedia(media: media, arguments: arguments, scale: backingScaleFactor, positionFlags: positionFlags), clearInstantly: clearInstantly)
@@ -492,9 +526,22 @@ class ChatInteractiveContentView: ChatMediaContentView {
                     }
                 })
             }
-            
-            self.image.set(arguments: arguments)
         }
+        
+                
+        self.image.set(arguments: arguments)
+        if arguments.imageSize.width == arguments.boundingSize.width {
+            if let positionFlags = positionFlags {
+                autoplayVideoView?.view.positionFlags = positionFlags
+            } else  {
+                autoplayVideoView?.view.positionFlags = nil
+                autoplayVideoView?.view.layer?.cornerRadius = .cornerRadius
+            }
+        } else {
+            autoplayVideoView?.view.positionFlags = nil
+            autoplayVideoView?.view.layer?.cornerRadius = 0
+        }
+        
         
         var first: Bool = true
         
@@ -520,8 +567,6 @@ class ChatInteractiveContentView: ChatMediaContentView {
                             strongSelf.fetchStatus = status
                         }
                     }
-                    
-                    
                     
                     
                     if let file = strongSelf.media as? TelegramMediaFile, strongSelf.autoplayVideo {
@@ -577,11 +622,11 @@ class ChatInteractiveContentView: ChatMediaContentView {
                         containsSecretMedia = message.containsSecretMedia
                     }
                     
-                    if let _ = parent?.autoremoveAttribute?.countdownBeginTime {
+                    if let autoremoveAttribute = parent?.autoremoveAttribute, autoremoveAttribute.timeout <= 60, autoremoveAttribute.countdownBeginTime != nil {
                         strongSelf.progressView?.removeFromSuperview()
                         strongSelf.progressView = nil
                         if strongSelf.timableProgressView == nil {
-                            strongSelf.timableProgressView = TimableProgressView()
+                            strongSelf.timableProgressView = TimableProgressView(size: NSMakeSize(parent?.groupingKey != nil ? 30 : 40.0, parent?.groupingKey != nil ? 30 : 40.0))
                             strongSelf.addSubview(strongSelf.timableProgressView!)
                         }
                     } else {
@@ -651,7 +696,7 @@ class ChatInteractiveContentView: ChatMediaContentView {
                     case .Local:
                         var state: RadialProgressState = .None
                         if containsSecretMedia {
-                            state = .Icon(image: theme.icons.chatSecretThumb, mode:.destinationOut)
+                            state = .Icon(image: parent?.groupingKey != nil ? theme.icons.chatSecretThumbSmall : theme.icons.chatSecretThumb, mode:.normal)
                             
                             if let attribute = parent?.autoremoveAttribute, let countdownBeginTime = attribute.countdownBeginTime {
                                 let difference:TimeInterval = TimeInterval((countdownBeginTime + attribute.timeout)) - (CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)

@@ -19,7 +19,7 @@ extension Message : Equatable {
 }
 
 private enum PeerMediaMonthEntry : TableItemListNodeEntry {
-    case month(index: MessageIndex, items: [Message])
+    case month(index: MessageIndex, items: [Message], viewType: GeneralViewType)
     case date(index: MessageIndex)
     case section(index: MessageIndex)
         
@@ -31,7 +31,7 @@ private enum PeerMediaMonthEntry : TableItemListNodeEntry {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM yyyy";
         switch self {
-        case let .month(index, _):
+        case let .month(index, _, _):
             let date = Date(timeIntervalSince1970: TimeInterval(index.timestamp))
             return "items: \(formatter.string(from: date))"
         case let .date(index):
@@ -45,8 +45,8 @@ private enum PeerMediaMonthEntry : TableItemListNodeEntry {
     
     func item(_ arguments: PeerMediaPhotosArguments, initialSize: NSSize) -> TableRowItem {
         switch self {
-        case let .month(_, items):
-            return PeerPhotosMonthItem(initialSize, stableId: stableId, context: arguments.context, chatInteraction: arguments.chatInteraction, gallerySupplyment: arguments.gallerySupplyment, items: items)
+        case let .month(_, items, viewType):
+            return PeerPhotosMonthItem(initialSize, stableId: stableId, viewType: viewType, context: arguments.context, chatInteraction: arguments.chatInteraction, gallerySupplyment: arguments.gallerySupplyment, items: items)
         case .date:
             return PeerMediaDateItem(initialSize, index: index, stableId: stableId)
         case .section:
@@ -60,7 +60,7 @@ private enum PeerMediaMonthEntry : TableItemListNodeEntry {
     
     var index: MessageIndex {
         switch self {
-        case let .month(index, _):
+        case let .month(index, _, _):
             return index
         case let .date(index):
             return index
@@ -119,9 +119,14 @@ private func mediaEntires(state: PeerMediaPhotosState, arguments: PeerMediaPhoto
             let nextDateId = mediaDateId(for: nextMessage.timestamp - timeDifference)
             if dateId != nextDateId {
                 let index = MessageIndex(id: MessageId(peerId: message.id.peerId, namespace: message.id.namespace, id: 0), timestamp: Int32(dateId))
-                entries.append(.section(index: index.successor()))
-                entries.append(.date(index: index))
-                entries.append(.month(index: index.predecessor(), items: temp))
+                var viewType: GeneralViewType = .modern(position: .single, insets: NSEdgeInsetsMake(0, 0, 1, 0))
+                if !entries.isEmpty {
+                    entries.append(.section(index: index.successor()))
+                    entries.append(.date(index: index))
+                } else {
+                    viewType = .modern(position: .last, insets: NSEdgeInsetsMake(0, 0, 1, 0))
+                }
+                entries.append(.month(index: index.predecessor(), items: temp, viewType: viewType))
                 temp.removeAll()
             }
         } else {
@@ -130,22 +135,22 @@ private func mediaEntires(state: PeerMediaPhotosState, arguments: PeerMediaPhoto
             
             if !entries.isEmpty {
                 switch entries[entries.count - 1] {
-                case let .month(prevIndex, items):
+                case let .month(prevIndex, items, viewType):
                     let prevDateId = mediaDateId(for: prevIndex.timestamp)
                     if prevDateId != dateId {
                         entries.append(.section(index: index.successor()))
                         entries.append(.date(index: index))
-                        entries.append(.month(index: index.predecessor(), items: temp))
+                        entries.append(.month(index: index.predecessor(), items: temp, viewType: .modern(position: .single, insets: NSEdgeInsetsMake(0, 0, 1, 0))))
                     } else {
-                        entries[entries.count - 1] = .month(index: prevIndex, items: items + temp)
+                        entries[entries.count - 1] = .month(index: prevIndex, items: items + temp, viewType: viewType)
                     }
                 default:
                     assertionFailure()
                 }
             } else {
-                entries.append(.section(index: index.successor()))
-                entries.append(.date(index: index))
-                entries.append(.month(index: index.predecessor(), items: temp))
+                //entries.append(.section(index: index.successor()))
+                //entries.append(.date(index: index))
+                entries.append(.month(index: index.predecessor(), items: temp, viewType: .modern(position: .last, insets: NSEdgeInsetsMake(0, 0, 1, 0))))
             }
             
         }
@@ -226,9 +231,11 @@ class PeerMediaPhotosController: TableViewController {
     private let historyDisposable = MetaDisposable()
     private let chatInteraction: ChatInteraction
     private let previous: Atomic<[AppearanceWrapperEntry<PeerMediaMonthEntry>]> = Atomic(value: [])
-    init(_ context: AccountContext, chatInteraction: ChatInteraction, peerId: PeerId) {
+    private let tags: MessageTags
+    init(_ context: AccountContext, chatInteraction: ChatInteraction, peerId: PeerId, tags: MessageTags) {
         self.peerId = peerId
         self.chatInteraction = chatInteraction
+        self.tags = tags
         super.init(context)
     }
     
@@ -238,12 +245,16 @@ class PeerMediaPhotosController: TableViewController {
         let context = self.context
         let peerId = self.peerId
         let initialSize = self.atomicSize
+        let tags = self.tags
+        
 
         self.genericView.set(stickClass: PeerMediaDateItem.self, handler: { item in
             
         })
         
-        self.genericView.emptyItem = PeerMediaEmptyRowItem(NSZeroSize, tags: .photoOrVideo)
+        self.genericView.needUpdateVisibleAfterScroll = true
+        
+        self.genericView.emptyItem = PeerMediaEmptyRowItem(NSZeroSize, tags: self.tags)
         
         let perPageCount:()->Int = {
             var rowCount:Int = 4
@@ -261,7 +272,7 @@ class PeerMediaPhotosController: TableViewController {
             return Int((initialSize.with { $0.height } / perWidth) * CGFloat(rowCount) + CGFloat(rowCount))
         }
 
-        var requestCount = perPageCount()
+        var requestCount = perPageCount() + 20
         
         let location: ValuePromise<ChatHistoryLocation> = ValuePromise(.Initial(count: requestCount), ignoreRepeated: true)
         
@@ -282,7 +293,7 @@ class PeerMediaPhotosController: TableViewController {
         }
         
         let history = location.get() |> mapToSignal { location in
-            return chatHistoryViewForLocation(location, account: context.account, chatLocation: .peer(peerId), fixedCombinedReadStates: nil, tagMask: [.photoOrVideo])
+            return chatHistoryViewForLocation(location, account: context.account, chatLocation: .peer(peerId), fixedCombinedReadStates: nil, tagMask: tags)
         }
         
         historyDisposable.set(history.start(next: { update in

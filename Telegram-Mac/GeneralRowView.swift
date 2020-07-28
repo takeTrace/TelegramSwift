@@ -12,7 +12,7 @@ import TGUIKit
 
 class GeneralContainableRowView : TableRowView {
     let containerView = GeneralRowContainerView(frame: NSZeroRect)
-    private let borderView: View = View()
+    let borderView: View = View()
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         super.addSubview(self.containerView)
@@ -25,6 +25,10 @@ class GeneralContainableRowView : TableRowView {
     
     override func addSubview(_ view: NSView) {
         self.containerView.addSubview(view)
+    }
+    
+    override func addSubview(_ view: NSView, positioned place: NSWindow.OrderingMode, relativeTo otherView: NSView?) {
+        self.containerView.addSubview(view, positioned: place, relativeTo: otherView)
     }
     
     override var backdorColor: NSColor {
@@ -74,6 +78,7 @@ class GeneralRowContainerView : Control {
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         layer?.mask = maskLayer
+        self.maskLayer.disableActions()
     }
     
     private var corners: GeneralViewItemCorners? = nil
@@ -93,9 +98,9 @@ class GeneralRowContainerView : Control {
             self.newPath = newPath
             
             self.maskLayer.animate(from: oldPath, to: newPath, keyPath: "path", timingFunction: .easeOut, duration: 0.18, removeOnCompletion: false, additive: false, completion: { [weak self] completed in
-                if completed {
+                //if completed {
                     self?.maskLayer.removeAllAnimations()
-                }
+               // }
                 self?.maskLayer.path = newPath
             })
             

@@ -23,7 +23,7 @@ extension Message {
 
 extension NSMutableAttributedString {
     func detectLinks(type:ParsingType, context:AccountContext? = nil, color:NSColor = theme.colors.link, openInfo:((PeerId, Bool, MessageId?, ChatInitialAction?)->Void)? = nil, hashtag:((String)->Void)? = nil, command:((String)->Void)? = nil, applyProxy:((ProxyServerSettings)->Void)? = nil, dotInMention: Bool = false) -> Void {
-        let things = ObjcUtils.textCheckingResults(forText: self.string, highlightMentionsAndTags: type.contains(.Mentions) || type.contains(.Hashtags), highlightCommands: type.contains(.Commands), dotInMention: dotInMention)
+        let things = ObjcUtils.textCheckingResults(forText: self.string, highlightMentions: type.contains(.Mentions), highlightTags: type.contains(.Hashtags), highlightCommands: type.contains(.Commands), dotInMention: dotInMention)
         
         self.beginEditing()
         
@@ -88,6 +88,7 @@ public extension String {
         str = str.replacingOccurrences(of: "8⃣", with: "8️⃣")
         str = str.replacingOccurrences(of: "9⃣", with: "9️⃣")
         str = str.replacingOccurrences(of: "0⃣", with: "0️⃣")
+        str = str.replacingOccurrences(of: "#⃣", with: "#️⃣")
         str = str.replacingOccurrences(of: "❤", with: "❤️")
         str = str.replacingOccurrences(of: "♥", with: "❤️")
         str = str.replacingOccurrences(of: "☁", with: "☁️")
@@ -98,6 +99,7 @@ public extension String {
         str = str.replacingOccurrences(of: "◻", with: "◻️")
         str = str.replacingOccurrences(of: "◼", with: "◼️")
         str = str.replacingOccurrences(of: "➡", with: "➡️")
+        str = str.replacingOccurrences(of: "⚰", with: "⚰️")
         
 
         return str
@@ -139,6 +141,33 @@ public extension String {
             }
         }
         return text as String
+    }
+}
+
+extension NSAttributedString {
+    var stringEmojiReplacements:NSAttributedString {
+        let text:NSMutableAttributedString = self.mutableCopy() as! NSMutableAttributedString
+        
+        for(key, obj) in emojiReplacements {
+            var nextRange = NSRange(location: 0, length: text.length)
+            var emojiRange = text.string.nsstring.range(of: key, options: [], range: nextRange)
+            while emojiRange.location != NSNotFound {
+                var length: Int = emojiRange.length
+                var c_prev: String = "!"
+                var c_next: String = "!"
+                let r_p = NSRange(location: max(0, Int(emojiRange.location) - 1), length: emojiRange.location == 0 ? 0 : 1)
+                let r_n = NSRange(location: max(0, emojiRange.length + emojiRange.location), length: min(1, text.length - (emojiRange.location + emojiRange.length)))
+                c_prev = text.string.nsstring.substring(with: r_p)
+                c_next = text.string.nsstring.substring(with: r_n)
+                if c_prev.trimmed.length == 0 && c_next.trimmed.length == 0 {
+                    text.replaceCharacters(in: emojiRange, with: obj)
+                    length = obj.length
+                }
+                nextRange = NSRange(location: emojiRange.location + length, length: text.length - emojiRange.location - length)
+                emojiRange = text.string.nsstring.range(of: key, options: [], range: nextRange)
+            }
+        }
+        return text
     }
 }
 
@@ -1698,6 +1727,7 @@ extension Array {
 }
 
 func copyToClipboard(_ string:String) {
+    NSPasteboard.general.clearContents()
     NSPasteboard.general.declareTypes([.string], owner: nil)
     NSPasteboard.general.setString(string, forType: .string)
 }
@@ -1793,14 +1823,30 @@ extension CGImage {
         
         let thumbnailImage: CGImage = self
         
-        let thumbnailContextSize = thumbnailImage.size
-        let thumbnailContext = DrawingContext(size: thumbnailContextSize, scale: 1.0)
+        let thumbnailContextSize = thumbnailImage.size.multipliedByScreenScale()
+        
+        let thumbnailContextSmallSize = thumbnailContextSize.aspectFitted(NSMakeSize(50, 50))
+        
+        let thumbnailContext = DrawingContext(size: thumbnailContextSmallSize, scale: 1.0)
+        
+        
+        
         thumbnailContext.withContext { ctx in
             ctx.interpolationQuality = .none
-            
             ctx.draw(thumbnailImage, in: CGRect(origin: CGPoint(), size: thumbnailContextSize))
         }
-        telegramFastBlur(Int32(thumbnailContextSize.width), Int32(thumbnailContextSize.height), Int32(thumbnailContext.bytesPerRow), thumbnailContext.bytes)
+        
+        telegramFastBlurMore(Int32(thumbnailContextSmallSize.width), Int32(thumbnailContextSmallSize.height), Int32(thumbnailContext.bytesPerRow), thumbnailContext.bytes)
+        
+        let thumb = DrawingContext(size: thumbnailContextSize, scale: 1.0)
+
+        
+        thumb.withContext { ctx in
+            ctx.interpolationQuality = .none
+            ctx.draw(thumbnailContext.generateImage()!, in: CGRect(origin: CGPoint(), size: thumbnailContextSize))
+        }
+      //  telegramFastBlurMore(Int32(thumbnailContextSize.width), Int32(thumbnailContextSize.height), Int32(thumb.bytesPerRow), thumb.bytes)
+
         
         return thumbnailContext.generateImage()!
     }
@@ -2322,5 +2368,68 @@ extension CGImage {
         CGImageDestinationAddImage(destination, self, nil)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return mutableData as Data
+    }
+}
+
+func localizedPsa(_ key: String, type: String, args: [CVarArg] = []) -> String {
+    let fullKey = key + "." + type
+    let cloud = translate(key: fullKey, args)
+    if cloud == fullKey {
+        return translate(key: key, args)
+    } else {
+        return cloud
+    }
+}
+
+func + (left: CGPoint, right: CGPoint) -> CGPoint {
+    return CGPoint(x: left.x + right.x, y: left.y + right.y)
+}
+func - (left: CGPoint, right: CGPoint) -> CGPoint {
+    return CGPoint(x: left.x - right.x, y: left.y - right.y)
+}
+func + (left: CGSize, right: CGSize) -> CGSize {
+    return CGSize(width: left.width + right.width, height: left.height + right.height)
+}
+func - (left: CGSize, right: CGSize) -> CGSize {
+    return CGSize(width: left.width - right.width, height: left.height - right.height)
+}
+
+
+func freeSystemGygabytes() -> UInt64? {
+    let attrs = try? FileManager.default.attributesOfFileSystem(forPath: "/")
+    
+    if let freeBytes = attrs?[FileAttributeKey.systemFreeSize] as? UInt64 {
+        return freeBytes / 1073741824
+    }
+    return nil
+}
+
+func showOutOfMemoryWarning(_ window: Window, freeSpace: UInt64, context: AccountContext) {
+    let alert: NSAlert = NSAlert()
+    alert.addButton(withTitle: L10n.systemMemoryWarningOK)
+    alert.addButton(withTitle: L10n.systemMemoryWarningDataAndStorage)
+   // alert.addButton(withTitle: L10n.systemMemoryWarningManageSystemStorage)
+    
+    alert.messageText = L10n.systemMemoryWarningHeader
+    alert.informativeText = L10n.systemMemoryWarningText(freeSpace == 0 ? L10n.systemMemoryWarningLessThen1GB : L10n.systemMemoryWarningFreeSpace(Int(freeSpace)))
+    alert.alertStyle = .critical
+    
+    alert.beginSheetModal(for: window, completionHandler: { response in
+        switch response.rawValue {
+        case 1000:
+            break
+        case 1001:
+            context.sharedContext.bindings.rootNavigation().push(StorageUsageController(context))
+        case 1002:
+            openSystemSettings(.storage)
+        default:
+            break
+        }
+    })
+}
+
+extension NSImage {
+    var _cgImage: CGImage? {
+        return self.cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
 }

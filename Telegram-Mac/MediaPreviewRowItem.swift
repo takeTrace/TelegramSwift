@@ -64,7 +64,7 @@ class MediaPreviewRowItem: TableRowItem {
     }
     
     override var identifier: String {
-        return super.identifier + "\(stableId)"
+        return "\(ChatLayoutUtils.contentNode(for: media))"
     }
     
     override var height: CGFloat {
@@ -73,11 +73,11 @@ class MediaPreviewRowItem: TableRowItem {
     
     var contentSize: NSSize {
         let contentSize = layoutSize
-        return NSMakeSize(width - (media.isInteractiveMedia ? 20 : 60), overSize ?? contentSize.height)
+        return NSMakeSize(width - (media.isInteractiveMedia ? 20 : 40), overSize ?? contentSize.height)
     }
     
     override var layoutSize: NSSize {
-        return ChatLayoutUtils.contentSize(for: media, with: initialSize.width - (media.isInteractiveMedia ? 20 : 60))
+        return ChatLayoutUtils.contentSize(for: media, with: initialSize.width - (media.isInteractiveMedia ? 20 : 80))
     }
     
     public func contentNode() -> ChatMediaContentView.Type {

@@ -91,6 +91,10 @@ open class TransformImageView: NSView {
         }))
     }
     
+    open override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+    }
+    
     
     public func setSignal(_ signal: Signal<ImageDataTransformation, NoError>, clearInstantly: Bool = false, animate:Bool = false, synchronousLoad: Bool = false, cacheImage:@escaping(TransformImageResult) -> Void = { _ in } ) {
         if clearInstantly {
@@ -146,10 +150,6 @@ open class TransformImageView: NSView {
     override open func copy() -> Any {
         let view = NSView()
         view.wantsLayer = true
-        
-        
-        
-        
         view.background = .clear
         view.layer?.contents = self.image
         view.frame = self.visibleRect

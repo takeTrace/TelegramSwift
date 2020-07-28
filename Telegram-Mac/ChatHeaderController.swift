@@ -17,12 +17,12 @@ import Postbox
 
 enum ChatHeaderState : Identifiable, Equatable {
     case none
-    case search(ChatSearchInteractions, Peer?)
-    case addContact(block: Bool)
+    case search(ChatSearchInteractions, Peer?, String?)
+    case addContact(block: Bool, autoArchived: Bool)
     case shareInfo
     case pinned(MessageId)
-    case report
-    case sponsored
+    case report(autoArchived: Bool)
+    case promo(PromoChatListItem.Kind)
     var stableId:Int {
         switch self {
         case .none:
@@ -35,7 +35,7 @@ enum ChatHeaderState : Identifiable, Equatable {
             return 3
         case .pinned:
             return 4
-        case .sponsored:
+        case .promo:
             return 5
         case .shareInfo:
             return 6
@@ -56,7 +56,7 @@ enum ChatHeaderState : Identifiable, Equatable {
             return 44
         case .pinned:
             return 44
-        case .sponsored:
+        case .promo:
             return 44
         }
     }
@@ -69,13 +69,17 @@ enum ChatHeaderState : Identifiable, Equatable {
             } else {
                 return false
             }
+        case let .addContact(block, autoArchive):
+            if case .addContact(block, autoArchive) = rhs {
+                return true
+            } else {
+                return false
+            }
         default:
             return lhs.stableId == rhs.stableId
         }
     }
 }
-
-
 
 
 class ChatHeaderController {
@@ -127,18 +131,18 @@ class ChatHeaderController {
     private func viewIfNecessary(_ size:NSSize) -> View? {
         let view:View?
         switch _headerState {
-        case let .addContact(block):
-            view = AddContactView(chatInteraction, canBlock: block)
+        case let .addContact(block, autoArchived):
+            view = AddContactView(chatInteraction, canBlock: block, autoArchived: autoArchived)
         case .shareInfo:
             view = ShareInfoView(chatInteraction)
         case let .pinned(messageId):
             view = ChatPinnedView(messageId, chatInteraction: chatInteraction)
-        case let .search(interactions, initialPeer):
-            view = ChatSearchHeader(interactions, chatInteraction: chatInteraction, initialPeer: initialPeer)
-        case .report:
-            view = ChatReportView(chatInteraction)
-        case .sponsored:
-            view = ChatSponsoredView(chatInteraction: chatInteraction)
+        case let .search(interactions, initialPeer, initialString):
+            view = ChatSearchHeader(interactions, chatInteraction: chatInteraction, initialPeer: initialPeer, initialString: initialString)
+        case let .report(autoArchived):
+            view = ChatReportView(chatInteraction, autoArchived: autoArchived)
+        case let .promo(kind):
+            view = ChatSponsoredView(chatInteraction: chatInteraction, kind: kind)
         case .none:
             view = nil
         
@@ -164,16 +168,45 @@ struct ChatSearchInteractions {
 private class ChatSponsoredModel: ChatAccessoryModel {
     
 
-    init() {
+    init(title: String, text: String) {
         super.init()
-        update()
+        update(title: title, text: text)
     }
     
-    func update() {
-        self.headerAttr = .initialize(string: L10n.chatProxySponsoredCapTitle, color: theme.colors.link, font: .medium(.text))
-        self.messageAttr = .initialize(string: L10n.chatProxySponsoredCapDesc, color: theme.colors.text, font: .normal(.text))
+    func update(title: String, text: String) {
+        //L10n.chatProxySponsoredCapTitle
+        self.headerAttr = .initialize(string: title, color: theme.colors.link, font: .medium(.text))
+        self.messageAttr = .initialize(string: text, color: theme.colors.text, font: .normal(.text))
         nodeReady.set(.single(true))
         self.setNeedDisplay()
+    }
+}
+
+private extension PromoChatListItem.Kind {
+    var title: String {
+        switch self {
+        case .proxy:
+            return L10n.chatProxySponsoredCapTitle
+        case .psa:
+            return L10n.psaChatTitle
+        }
+    }
+    var text: String {
+        switch self {
+        case .proxy:
+            return L10n.chatProxySponsoredCapDesc
+        case let .psa(type, _):
+            return localizedPsa("psa.chat.text", type: type)
+        }
+    }
+    var learnMore: String? {
+        switch self {
+        case .proxy:
+            return nil
+        case let .psa(type, _):
+            let localized = localizedPsa("psa.chat.alert.learnmore", type: type)
+            return localized != localized ? localized : nil
+        }
     }
 }
 
@@ -181,9 +214,14 @@ private final class ChatSponsoredView : Control {
     private let chatInteraction:ChatInteraction
     private let container:ChatAccessoryView = ChatAccessoryView()
     private let dismiss:ImageButton = ImageButton()
-    private let node: ChatSponsoredModel = ChatSponsoredModel()
-    init(chatInteraction:ChatInteraction) {
+    private let node: ChatSponsoredModel
+    private let kind: PromoChatListItem.Kind
+    init(chatInteraction:ChatInteraction, kind: PromoChatListItem.Kind) {
         self.chatInteraction = chatInteraction
+        
+        self.kind = kind
+        
+        node = ChatSponsoredModel(title: kind.title, text: kind.text)
         super.init()
         
         dismiss.disableActions()
@@ -191,18 +229,36 @@ private final class ChatSponsoredView : Control {
         _ = self.dismiss.sizeToFit()
         
         self.set(handler: { _ in
-            confirm(for: mainWindow, header: L10n.chatProxySponsoredAlertHeader, information: L10n.chatProxySponsoredAlertText, cancelTitle: "", thridTitle: L10n.chatProxySponsoredAlertSettings, successHandler: { result in
-                switch result {
-                case .thrid:
-                    chatInteraction.openProxySettings()
-                default:
-                    break
+            
+            switch kind {
+            case .proxy:
+                confirm(for: chatInteraction.context.window, header: L10n.chatProxySponsoredAlertHeader, information: L10n.chatProxySponsoredAlertText, cancelTitle: "", thridTitle: L10n.chatProxySponsoredAlertSettings, successHandler: { result in
+                    switch result {
+                    case .thrid:
+                        chatInteraction.openProxySettings()
+                    default:
+                        break
+                    }
+                })
+            case .psa:
+                if let learnMore = kind.learnMore {
+                    confirm(for: chatInteraction.context.window, header: kind.title, information: kind.text, cancelTitle: "", thridTitle: learnMore, successHandler: { result in
+                        switch result {
+                        case .thrid:
+                            execute(inapp: .external(link: learnMore, false))
+                        default:
+                            break
+                        }
+                    })
                 }
-            })
+                
+            }
+            
+            
         }, for: .Click)
         
         dismiss.set(handler: { _ in
-            FastSettings.adAlertViewed()
+            FastSettings.removePromoTitle(for: chatInteraction.peerId)
             chatInteraction.update({$0.withoutInitialAction()})
         }, for: .SingleClick)
         
@@ -221,10 +277,11 @@ private final class ChatSponsoredView : Control {
         self.backgroundColor = theme.colors.background
         self.dismiss.set(image: theme.icons.dismissPinned, for: .Normal)
         container.backgroundColor = theme.colors.background
+        node.update(title: self.kind.title, text: self.kind.text)
     }
     
     override func layout() {
-        node.update()
+        node.update(title: self.kind.title, text: self.kind.text)
         node.measureSize(frame.width - 70)
         container.setFrameSize(frame.width - 70, node.size.height)
         container.centerY(x: 20)
@@ -329,9 +386,12 @@ class ChatPinnedView : Control {
 class ChatReportView : Control {
     private let chatInteraction:ChatInteraction
     private let report:TitleButton = TitleButton()
+    private let unarchiveButton = TitleButton()
     private let dismiss:ImageButton = ImageButton()
 
-    init(_ chatInteraction:ChatInteraction) {
+    private let buttonsContainer = View()
+    
+    init(_ chatInteraction:ChatInteraction, autoArchived: Bool) {
         self.chatInteraction = chatInteraction
         super.init()
         dismiss.disableActions()
@@ -352,8 +412,18 @@ class ChatReportView : Control {
             chatInteraction.dismissPeerStatusOptions()
         }, for: .SingleClick)
         
+        unarchiveButton.set(handler: { _ in
+            chatInteraction.unarchive()
+        }, for: .SingleClick)
+        
+        buttonsContainer.addSubview(report)
+
+        if autoArchived {
+            buttonsContainer.addSubview(unarchiveButton)
+        }
+        addSubview(buttonsContainer)
+        
         addSubview(dismiss)
-        addSubview(report)
         updateLocalizationAndTheme(theme: theme)
     }
     
@@ -364,6 +434,11 @@ class ChatReportView : Control {
         report.set(text: tr(L10n.chatHeaderReportSpam), for: .Normal)
         report.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.redUI, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentSelect)
         _ = report.sizeToFit()
+        
+        unarchiveButton.set(text: L10n.peerInfoUnarchive, for: .Normal)
+        
+        unarchiveButton.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.accent, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentSelect)
+        
         self.backgroundColor = theme.colors.background
         needsLayout = true
     }
@@ -377,6 +452,25 @@ class ChatReportView : Control {
     override func layout() {
         report.center()
         dismiss.centerY(x: frame.width - dismiss.frame.width - 20)
+        
+        
+        buttonsContainer.frame = NSMakeRect(0, 0, frame.width - (frame.width - dismiss.frame.minX), frame.height - .borderSize)
+        
+        
+        var buttons:[Control] = []
+        if report.superview != nil {
+            buttons.append(report)
+        }
+        if unarchiveButton.superview != nil {
+            buttons.append(unarchiveButton)
+        }
+        
+        let buttonWidth: CGFloat = floor(buttonsContainer.frame.width / CGFloat(buttons.count))
+        var x: CGFloat = 0
+        for button in buttons {
+            button.frame = NSMakeRect(x, 0, buttonWidth, buttonsContainer.frame.height)
+            x += buttonWidth
+        }
     }
     
     required init?(coder: NSCoder) {
@@ -464,8 +558,9 @@ class AddContactView : Control {
     private let add:TitleButton = TitleButton()
     private let dismiss:ImageButton = ImageButton()
     private let blockButton: TitleButton = TitleButton()
+    private let unarchiveButton = TitleButton()
     private let buttonsContainer = View()
-    init(_ chatInteraction:ChatInteraction, canBlock: Bool) {
+    init(_ chatInteraction:ChatInteraction, canBlock: Bool, autoArchived: Bool) {
         self.chatInteraction = chatInteraction
         super.init()
         self.style = ControlStyle(backgroundColor: theme.colors.background)
@@ -486,13 +581,25 @@ class AddContactView : Control {
             chatInteraction.blockContact()
         }, for: .SingleClick)
         
+        unarchiveButton.set(handler: { _ in
+            chatInteraction.unarchive()
+        }, for: .SingleClick)
         
        
         
-        buttonsContainer.addSubview(add)
         if canBlock {
             buttonsContainer.addSubview(blockButton)
         }
+        if autoArchived {
+            buttonsContainer.addSubview(unarchiveButton)
+        }
+        
+        if !autoArchived && canBlock {
+            buttonsContainer.addSubview(add)
+        } else if !autoArchived && !canBlock {
+            buttonsContainer.addSubview(add)
+        }
+        
         addSubview(buttonsContainer)
         addSubview(dismiss)
         updateLocalizationAndTheme(theme: theme)
@@ -511,7 +618,9 @@ class AddContactView : Control {
             add.set(text: L10n.peerInfoAddContact, for: .Normal)
         }
         blockButton.set(text: L10n.peerInfoBlockUser, for: .Normal)
-
+        unarchiveButton.set(text: L10n.peerInfoUnarchive, for: .Normal)
+        
+        unarchiveButton.style = ControlStyle(font: .normal(.text), foregroundColor: theme.colors.accent, backgroundColor: theme.colors.background, highlightColor: theme.colors.accentSelect)
         
         self.backgroundColor = theme.colors.background
         needsLayout = true
@@ -525,14 +634,28 @@ class AddContactView : Control {
     
     override func layout() {
         dismiss.centerY(x: frame.width - dismiss.frame.width - 20)
-        if blockButton.superview == nil {
-            buttonsContainer.frame = NSMakeRect(0, 0, frame.width, frame.height - .borderSize)
-            add.setFrameSize(NSMakeSize(add.frame.width, buttonsContainer.frame.height))
-            add.center()
-        } else {
-            buttonsContainer.frame = NSMakeRect(0, 0, frame.width - (frame.width - dismiss.frame.minX), frame.height - .borderSize)
-            add.frame = NSMakeRect(buttonsContainer.frame.width / 2, 0, buttonsContainer.frame.width / 2, buttonsContainer.frame.height)
-            blockButton.frame = NSMakeRect(0, 0, buttonsContainer.frame.width / 2, buttonsContainer.frame.height)
+        
+        var buttons:[Control] = []
+        
+        
+        if add.superview != nil {
+            buttons.append(add)
+        }
+        if blockButton.superview != nil {
+            buttons.append(blockButton)
+        }
+        if unarchiveButton.superview != nil {
+            buttons.append(unarchiveButton)
+        }
+        
+        buttonsContainer.frame = NSMakeRect(0, 0, frame.width - (frame.width - dismiss.frame.minX), frame.height - .borderSize)
+
+        
+        let buttonWidth: CGFloat = floor(buttonsContainer.frame.width / CGFloat(buttons.count))
+        var x: CGFloat = 0
+        for button in buttons {
+            button.frame = NSMakeRect(x, 0, buttonWidth, buttonsContainer.frame.height)
+            x += buttonWidth
         }
     }
     
@@ -679,13 +802,19 @@ class ChatSearchHeader : View, Notifable {
     private let loadingDisposable = MetaDisposable()
    
     private let calendarController: CalendarController
-    init(_ interactions:ChatSearchInteractions, chatInteraction: ChatInteraction, initialPeer: Peer?) {
+    init(_ interactions:ChatSearchInteractions, chatInteraction: ChatInteraction, initialPeer: Peer?, initialString: String?) {
         self.interactions = interactions
         self.parentInteractions = chatInteraction
         self.calendarController = CalendarController(NSMakeRect(0, 0, 250, 250), chatInteraction.context.window, selectHandler: interactions.calendarAction)
         self.chatInteraction = ChatInteraction(chatLocation: chatInteraction.chatLocation, context: chatInteraction.context)
         self.chatInteraction.update({$0.updatedPeer({_ in chatInteraction.presentation.peer})})
         self.inputContextHelper = InputContextHelper(chatInteraction: self.chatInteraction, highlightInsteadOfSelect: true)
+        
+        if let initialString = initialString {
+            searchView.setString(initialString)
+            self.query.set(SearchStateQuery(initialString, nil))
+        }
+
         
         super.init()
         

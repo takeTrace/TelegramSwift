@@ -104,6 +104,12 @@ class StickerSetTableRowView : TableRowView, ViewDisplayDelegate {
         
         containerView.set(handler: { control in
             if let event = NSApp.currentEvent {
+                control.superview?.mouseDragged(with: event)
+            }
+        }, for: .MouseDragging)
+        
+        containerView.set(handler: { control in
+            if let event = NSApp.currentEvent {
                 control.superview?.mouseUp(with: event)
             }
         }, for: .Up)
@@ -222,7 +228,7 @@ class StickerSetTableRowView : TableRowView, ViewDisplayDelegate {
                 
                 var file: TelegramMediaFile?
                 if let thumbnail = item.info.thumbnail {
-                    file = TelegramMediaFile(fileId: MediaId(namespace: 0, id: item.info.id.id), partialReference: nil, resource: thumbnail.resource, previewRepresentations: [thumbnail], immediateThumbnailData: nil, mimeType: "application/x-tgsticker", size: nil, attributes: [.FileName(fileName: "sticker.tgs"), .Sticker(displayText: "", packReference: .id(id: item.info.id.id, accessHash: item.info.accessHash), maskData: nil)])
+                    file = TelegramMediaFile(fileId: MediaId(namespace: 0, id: item.info.id.id), partialReference: nil, resource: thumbnail.resource, previewRepresentations: [thumbnail], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/x-tgsticker", size: nil, attributes: [.FileName(fileName: "sticker.tgs"), .Sticker(displayText: "", packReference: .id(id: item.info.id.id, accessHash: item.info.accessHash), maskData: nil)])
                 } else if let item = item.topItem {
                     file = item.file
                 }

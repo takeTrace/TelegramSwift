@@ -243,7 +243,19 @@ extension TelegramMediaFile {
         return true
     }
     
-
+//    var streaming: MediaPlayerStreaming {
+//        for attr in attributes {
+//            if case let .Video(_, _, flags) = attr {
+//                if flags.contains(.supportsStreaming) {
+//                    return .earlierStart
+//                } else {
+//                    return .none
+//                }
+//            }
+//        }
+//        return .none
+//    }
+    
     
     var imageSize:NSSize {
         for attr in attributes {
@@ -268,7 +280,7 @@ extension TelegramMediaFile {
     }
     
     func withUpdatedResource(_ resource: TelegramMediaResource) -> TelegramMediaFile {
-        return TelegramMediaFile(fileId: self.fileId, partialReference: self.partialReference, resource: resource, previewRepresentations: self.previewRepresentations, immediateThumbnailData: self.immediateThumbnailData, mimeType: self.mimeType, size: self.size, attributes: self.attributes)
+        return TelegramMediaFile(fileId: self.fileId, partialReference: self.partialReference, resource: resource, previewRepresentations: self.previewRepresentations, videoThumbnails: self.videoThumbnails, immediateThumbnailData: self.immediateThumbnailData, mimeType: self.mimeType, size: self.size, attributes: self.attributes)
     }
 }
 
@@ -784,6 +796,13 @@ func canDeleteForEveryoneMessage(_ message:Message, context: AccountContext) -> 
         return false
     } else if message.peers[message.id.peerId] is TelegramUser || message.peers[message.id.peerId] is TelegramGroup {
         if context.limitConfiguration.canRemoveIncomingMessagesInPrivateChats && message.peers[message.id.peerId] is TelegramUser {
+            
+            if message.media.first is TelegramMediaDice, message.peers[message.id.peerId] is TelegramUser {
+                if Int(message.timestamp) + 24 * 60 * 60 > context.timestamp {
+                    return false
+                }
+            }
+            
             return true
         }
         if let peer = message.peers[message.id.peerId] as? TelegramGroup {
@@ -848,9 +867,9 @@ func canEditMessage(_ message:Message, context: AccountContext) -> Bool {
             if file.isInstantVideo {
                 return false
             }
-            if file.isVoice {
-                return false
-            }
+//            if file.isVoice {
+//                return false
+//            }
         }
         if media is TelegramMediaContact {
             return false
@@ -879,7 +898,7 @@ func canEditMessage(_ message:Message, context: AccountContext) -> Bool {
     
     if let peer = messageMainPeer(message) as? TelegramChannel {
         if case .broadcast = peer.info {
-            return (peer.hasPermission(.sendMessages) || peer.hasPermission(.editAllMessages)) && Int(message.timestamp) + Int(context.limitConfiguration.maxMessageEditingInterval) > Int(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
+            return (peer.hasPermission(.sendMessages) || peer.hasPermission(.editAllMessages))
         } else if case .group = peer.info {
             if !message.flags.contains(.Incoming) {
                 if peer.hasPermission(.pinMessages) {
@@ -2447,16 +2466,16 @@ func proxySettings(accountManager: AccountManager) -> Signal<ProxySettings, NoEr
     }
 }
 
-public extension ProxySettings {
-    public func withUpdatedActiveServer(_ activeServer: ProxyServerSettings?) -> ProxySettings {
+extension ProxySettings {
+    func withUpdatedActiveServer(_ activeServer: ProxyServerSettings?) -> ProxySettings {
         return ProxySettings(enabled: self.enabled, servers: servers, activeServer: activeServer, useForCalls: self.useForCalls)
     }
     
-    public func withUpdatedEnabled(_ enabled: Bool) -> ProxySettings {
+    func withUpdatedEnabled(_ enabled: Bool) -> ProxySettings {
         return ProxySettings(enabled: enabled, servers: self.servers, activeServer: self.activeServer, useForCalls: self.useForCalls)
     }
     
-    public func withAddedServer(_ proxy: ProxyServerSettings) -> ProxySettings {
+    func withAddedServer(_ proxy: ProxyServerSettings) -> ProxySettings {
         var servers = self.servers
         if servers.first(where: {$0 == proxy}) == nil {
             servers.append(proxy)
@@ -2464,7 +2483,7 @@ public extension ProxySettings {
         return ProxySettings(enabled: self.enabled, servers: servers, activeServer: self.activeServer, useForCalls: self.useForCalls)
     }
     
-    public func withUpdatedServer(_ current: ProxyServerSettings, with updated: ProxyServerSettings) -> ProxySettings {
+    func withUpdatedServer(_ current: ProxyServerSettings, with updated: ProxyServerSettings) -> ProxySettings {
         var servers = self.servers
         if let index = servers.index(where: {$0 == current}) {
             servers[index] = updated
@@ -2478,15 +2497,15 @@ public extension ProxySettings {
         return ProxySettings(enabled: self.enabled, servers: servers, activeServer: activeServer, useForCalls: self.useForCalls)
     }
     
-    public func withUpdatedUseForCalls(_ enable: Bool) -> ProxySettings {
+    func withUpdatedUseForCalls(_ enable: Bool) -> ProxySettings {
         return ProxySettings(enabled: self.enabled, servers: servers, activeServer: self.activeServer, useForCalls: enable)
     }
     
-    public func withRemovedServer(_ proxy: ProxyServerSettings) -> ProxySettings {
+    func withRemovedServer(_ proxy: ProxyServerSettings) -> ProxySettings {
         var servers = self.servers
         var activeServer = self.activeServer
         var enabled: Bool = self.enabled
-        if let index = servers.index(where: {$0 == proxy}) {
+        if let index = servers.firstIndex(where: {$0 == proxy}) {
             _ = servers.remove(at: index)
         }
         if proxy == activeServer {
@@ -2574,7 +2593,7 @@ enum FaqDestination {
 func openFaq(context: AccountContext, dest: FaqDestination = .telegram) {
     let language = appCurrentLanguage.languageCode[appCurrentLanguage.languageCode.index(appCurrentLanguage.languageCode.endIndex, offsetBy: -2) ..< appCurrentLanguage.languageCode.endIndex]
     
-    _ = showModalProgress(signal: webpagePreview(account: context.account, url: dest.url + language) |> deliverOnMainQueue, for: context.window).start(next: { webpage in
+    _ = showModalProgress(signal: webpagePreview(account: context.account, url: dest.url) |> deliverOnMainQueue, for: context.window).start(next: { webpage in
         if let webpage = webpage {
             showInstantPage(InstantPageViewController(context, webPage: webpage, message: nil))
         } else {
@@ -2673,12 +2692,23 @@ func requestMediaPermission(_ type: AVFoundation.AVMediaType) -> Signal<Bool, No
 
 enum SystemSettingsCategory : String {
     case microphone = "Privacy_Microphone"
+    case storage = "Storage"
     case none = ""
 }
 
 func openSystemSettings(_ category: SystemSettingsCategory) {
-    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(category.rawValue)") {
-        NSWorkspace.shared.open(url)
+    switch category {
+    case .storage:
+        //if let url = URL(string: "/System/Applications/Utilities/System%20Information.app") {
+            NSWorkspace.shared.launchApplication("/System/Applications/Utilities/System Information.app")
+           // [[NSWorkspace sharedWorkspace] launchApplication:@"/Applications/Safari.app"];
+       // }
+    case .microphone:
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(category.rawValue)") {
+            NSWorkspace.shared.open(url)
+        }
+    default:
+        break
     }
 }
 
@@ -2810,12 +2840,12 @@ extension TelegramMediaWebpageLoadedContent {
                     break
                 }
             }
-            newUrl = newUrl.replacingOccurrences(of: parsed, with: "\(timecode)", options: .caseInsensitive, range: range.lowerBound ..< newUrl.endIndex)
+            newUrl = newUrl.replacingOccurrences(of: parsed, with: "\(Int(timecode))", options: .caseInsensitive, range: range.lowerBound ..< newUrl.endIndex)
         } else {
             if url.contains("?") {
-                newUrl = self.url + "&t=\(timecode)"
+                newUrl = self.url + "&t=\(Int(timecode))"
             } else {
-                newUrl = self.url + "?t=\(timecode)"
+                newUrl = self.url + "?t=\(Int(timecode))"
             }
         }
         return TelegramMediaWebpageLoadedContent(url: newUrl, displayUrl: self.displayUrl, hash: self.hash, type: self.type, websiteName: self.websiteName, title: self.title, text: self.text, embedUrl: self.embedUrl, embedType: self.embedType, embedSize: self.embedSize, duration: self.duration, author: self.author, image: self.image, file: self.file, attributes: self.attributes, instantPage: self.instantPage)

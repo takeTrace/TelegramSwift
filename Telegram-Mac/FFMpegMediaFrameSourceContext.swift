@@ -6,7 +6,6 @@ import TelegramCore
 import SyncCore
 
 
-
 private struct StreamContext {
     let index: Int
     let codecContext: FFMpegAVCodecContext?
@@ -74,8 +73,10 @@ private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: Unsa
      #endif*/
     
     let resourceSize: Int = resourceReference.resource.size ?? Int(Int32.max - 1)
-    let readCount = min(resourceSize - context.readingOffset, Int(bufferSize))
+    let readCount = max(0, min(resourceSize - context.readingOffset, Int(bufferSize)))
     let requestRange: Range<Int> = context.readingOffset ..< (context.readingOffset + readCount)
+    
+    assert(readCount < 16 * 1024 * 1024)
     
     if let maximumFetchSize = context.maximumFetchSize {
         context.touchedRanges.insert(integersIn: requestRange)
@@ -90,7 +91,7 @@ private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: Unsa
     }
     
     if streamable {
-        let data: Signal<Data, NoError>
+        let data: Signal<(Data, Bool), NoError>
         data = postbox.mediaBox.resourceData(resourceReference.resource, size: resourceSize, in: requestRange, mode: .complete)
         if readCount == 0 {
             fetchedData = Data()
@@ -101,15 +102,14 @@ private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: Unsa
                 let semaphore = DispatchSemaphore(value: 0)
                 let _ = context.currentSemaphore.swap(semaphore)
                 var completedRequest = false
-                
-                let disposable = data.start(next: { data in
-                    if data.count == readCount {
+                let disposable = data.start(next: { result in
+                    let (data, isComplete) = result
+                    if data.count == readCount || isComplete {
+                        precondition(data.count <= readCount)
                         fetchedData = data
                         completedRequest = true
                         semaphore.signal()
                     }
-                }, completed: {
-                    semaphore.signal()
                 })
                 semaphore.wait()
                 let _ = context.currentSemaphore.swap(nil)
@@ -127,7 +127,7 @@ private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: Unsa
                 let readingOffset = context.readingOffset
                 let readCount = max(0, min(fileSize - readingOffset, Int(bufferSize)))
                 let range = readingOffset ..< (readingOffset + readCount)
-                precondition(readCount < 1 * 1024 * 1024)
+                assert(readCount < 16 * 1024 * 1024)
                 
                 lseek(fd, off_t(range.lowerBound), SEEK_SET)
                 var data = Data(count: readCount)
@@ -150,6 +150,7 @@ private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: Unsa
                     let readCount = max(0, min(next.size - readingOffset, Int(bufferSize)))
                     let range = readingOffset ..< (readingOffset + readCount)
                     
+                    assert(readCount < 16 * 1024 * 1024)
                     
                     let fd = open(next.path, O_RDONLY, S_IRUSR)
                     if fd >= 0 {
@@ -178,6 +179,7 @@ private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: Unsa
         }
     }
     if let fetchedData = fetchedData {
+        precondition(fetchedData.count <= readCount)
         fetchedData.withUnsafeBytes { bytes -> Void in
             precondition(bytes.baseAddress != nil)
             memcpy(buffer, bytes.baseAddress, fetchedData.count)
@@ -352,7 +354,7 @@ final class FFMpegMediaFrameSourceContext: NSObject {
         
         let avFormatContext = FFMpegAVFormatContext()
         
-        guard let avIoContext = FFMpegAVIOContext(bufferSize: Int32(self.ioBufferSize), opaqueContext: Unmanaged.passUnretained(self).toOpaque(), readPacket: readPacketCallback, seek: seekCallback) else {
+        guard let avIoContext = FFMpegAVIOContext(bufferSize: Int32(self.ioBufferSize), opaqueContext: Unmanaged.passUnretained(self).toOpaque(), readPacket: readPacketCallback, writePacket: nil, seek: seekCallback) else {
             self.readingError = true
             return
         }
@@ -659,7 +661,6 @@ final class FFMpegMediaFrameSourceContext: NSObject {
         }
     }
     
-    
     func close() {
         self.closed = true
     }
@@ -682,4 +683,3 @@ private func videoFrameFromPacket(_ packet: FFMpegPacket, videoStream: StreamCon
     
     return MediaTrackDecodableFrame(type: .video, packet: packet, pts: pts, dts: dts, duration: duration)
 }
-

@@ -146,14 +146,25 @@ class MGalleryVideoItem: MGalleryItem {
             
             var pagerSize = self.pagerSize
             
-            pagerSize.height -= (caption != nil ? caption!.layoutSize.height + 80 : 0)
             
-            let size = NSMakeSize(max(size.width, 200), max(size.height, 200)).fitted(pagerSize)
+            var size = size
+
             
+//            let addition = max(400 - size.width, 400 - size.height)
+//            if addition > 0 {
+//                size.width += addition
+//                size.height += addition
+//            }
             
+            size = size.fitted(pagerSize)
+
             return size
         }
         return pagerSize
+    }
+    
+    func hideControls() -> Bool {
+        return controller.hideControlsIfNeeded()
     }
     
     override func toggleFullScreen() {
@@ -178,11 +189,13 @@ class MGalleryVideoItem: MGalleryItem {
     
     override func request(immediately: Bool) {
 
+        super.request(immediately: immediately)
         
         let signal:Signal<ImageDataTransformation,NoError> = chatMessageVideo(postbox: context.account.postbox, fileReference: entry.fileReference(media), scale: System.backingScale, synchronousLoad: true)
         
+        let size = sizeValue
         
-        let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: media.dimensions?.size.fitted(pagerSize) ?? sizeValue, boundingSize: sizeValue, intrinsicInsets: NSEdgeInsets(), resizeMode: .none)
+        let arguments = TransformImageArguments(corners: ImageCorners(), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets(), resizeMode: .none)
         let result = signal |> mapToThrottled { data -> Signal<CGImage?, NoError> in
             return .single(data.execute(arguments, data.data)?.generateImage())
         }
@@ -194,12 +207,10 @@ class MGalleryVideoItem: MGalleryItem {
             return .never()
         })
         
-        self.image.set(media.previewRepresentations.isEmpty ? .single(.image(nil, nil)) |> deliverOnMainQueue : result |> map { .image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil) } |> deliverOnMainQueue)
+        self.image.set(media.previewRepresentations.isEmpty ? .single(GPreviewValueClass(.image(nil, nil))) |> deliverOnMainQueue : result |> map { GPreviewValueClass(.image($0 != nil ? NSImage(cgImage: $0!, size: $0!.backingSize) : nil, nil)) } |> deliverOnMainQueue)
         
         fetch()
     }
-    
-    
     
     
     override func fetch() -> Void {

@@ -8,7 +8,7 @@
 //
 
 import Cocoa
-
+import TGUIKit
 import Postbox
 import SwiftSignalKit
 import TelegramCore
@@ -448,7 +448,7 @@ final class ChatTextInputState: PostboxCoding, Equatable {
     }
     
     
-    var messageTextEntities:[MessageTextEntity] {
+    func messageTextEntities(_ detectLinks: ParsingType = [.Hashtags]) -> [MessageTextEntity] {
         var entities:[MessageTextEntity] = []
         for attribute in attributes {
             switch attribute {
@@ -470,7 +470,7 @@ final class ChatTextInputState: PostboxCoding, Equatable {
         }
         
         let attr = NSMutableAttributedString(string: inputText)
-        attr.detectLinks(type: .Hashtags)
+        attr.detectLinks(type: detectLinks)
         
         attr.enumerateAttribute(NSAttributedString.Key.link, in: attr.range, options: NSAttributedString.EnumerationOptions(rawValue: 0), using: { (value, range, stop) in
             if let value = value as? inAppLink {
@@ -478,6 +478,8 @@ final class ChatTextInputState: PostboxCoding, Equatable {
                 case let .external(link, _):
                     if link.hasPrefix("#") {
                         entities.append(MessageTextEntity(range: range.lowerBound ..< range.upperBound, type: .Hashtag))
+                    } else if detectLinks.contains(.Links) {
+                        entities.append(MessageTextEntity(range: range.lowerBound ..< range.upperBound, type: .Url))
                     }
                 default:
                     break
@@ -679,6 +681,7 @@ final class ChatEditState : Equatable {
         return !message.media.isEmpty && (message.media[0] is TelegramMediaImage || message.media[0] is TelegramMediaFile)
     }
     func withUpdatedMedia(_ media: Media) -> ChatEditState {
+
         return ChatEditState(message: self.message.withUpdatedMedia([media]), originalMedia: self.originalMedia ?? self.message.media.first, state: self.inputState, loadingState: loadingState, editMedia: .update(AnyMediaReference.standalone(media: media)), editedData: self.editedData)
     }
     func withUpdatedLoadingState(_ loadingState: EditStateLoading) -> ChatEditState {
@@ -744,7 +747,7 @@ struct ChatInterfaceState: SynchronizeableChatInterfaceState, Equatable {
         if self.inputState.inputText.isEmpty && self.replyMessageId == nil {
             return nil
         } else {
-            return SynchronizeableChatInputState(replyToMessageId: self.replyMessageId, text: self.inputState.inputText, entities: self.inputState.messageTextEntities, timestamp: self.timestamp)
+            return SynchronizeableChatInputState(replyToMessageId: self.replyMessageId, text: self.inputState.inputText, entities: self.inputState.messageTextEntities(), timestamp: self.timestamp)
         }
     }
     

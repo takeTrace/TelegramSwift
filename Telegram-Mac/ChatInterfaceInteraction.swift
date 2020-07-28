@@ -144,9 +144,12 @@ final class ChatInteraction : InterfaceObserver  {
     var blockContact: ()->Void = {}
     var openScheduledMessages: ()->Void = {}
     var openBank: (String)->Void = { _ in }
-    
     var getGradientOffsetRect:()->NSRect = {  return .zero }
+    
+    var unarchive: ()->Void = { }
 
+    var closeAfterPeek:(Int32)->Void = { _ in }
+    
     var updateReactions: (MessageId, String, @escaping(Bool)->Void)->Void = { _, _, _ in }
     
     let loadingMessage: Promise<Bool> = Promise()
@@ -270,7 +273,7 @@ final class ChatInteraction : InterfaceObserver  {
                     self.update({$0.updatedInterfaceState({$0.updatedEditState({$0?.withUpdatedLoadingState(.none)})})})
                     return
                 default:
-                    if oldState.inputState.attributedString != editState.inputState.attributedString {
+                    if oldState.inputState.attributedString != editState.inputState.attributedString, !editState.inputState.attributedString.string.isEmpty {
                         confirm(for: context.window, information: L10n.chatEditCancelText, okTitle: L10n.alertDiscard, cancelTitle: L10n.alertNO, successHandler: { [weak self] _ in
                             self?.update({$0.withoutEditMessage().updatedUrlPreview(nil)})
                         })
@@ -341,6 +344,10 @@ final class ChatInteraction : InterfaceObserver  {
                 })
             case .ad:
                 break
+            case .source:
+                break
+            case let .closeAfter(peek):
+               break
             }
            
         }

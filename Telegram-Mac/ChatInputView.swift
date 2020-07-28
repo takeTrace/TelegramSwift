@@ -148,8 +148,14 @@ class ChatInputView: View, TGModernGrowingDelegate, Notifable {
     private var textPlaceholder: String {
         if let peer = chatInteraction.presentation.peer {
             if peer.isChannel {
+                if textView.frame.width < 150 {
+                    return L10n.messagesPlaceholderBroadcastSmall
+                }
                 return FastSettings.isChannelMessagesMuted(peer.id) ? L10n.messagesPlaceholderSilentBroadcast : L10n.messagesPlaceholderBroadcast
             }
+        }
+        if textView.frame.width < 150 {
+            return L10n.messagesPlaceholderSentMessageSmall
         }
         return L10n.messagesPlaceholderSentMessage
     }
@@ -421,6 +427,11 @@ class ChatInputView: View, TGModernGrowingDelegate, Notifable {
         guard let superview = superview else {return}
         textView.max_height = Int32(superview.frame.height / 2 + 50)
         
+        if textView.placeholderAttributedString?.string != self.textPlaceholder {
+            textView.setPlaceholderAttributedString(.initialize(string: textPlaceholder, color: theme.colors.grayText, font: NSFont.normal(theme.fontSize), coreText: false), update: false)
+        }
+
+
     }
     
     override func layout() {
@@ -496,17 +507,6 @@ class ChatInputView: View, TGModernGrowingDelegate, Notifable {
     public func textViewEnterPressed(_ event: NSEvent) -> Bool {
         
         if FastSettings.checkSendingAbility(for: event) {
-            if FastSettings.isPossibleReplaceEmojies {
-                let text = textView.string().stringEmojiReplacements
-                if textView.string() != text {
-                    self.textView.setString(text)
-                    let attributed = self.textView.attributedString()
-                    let range = self.textView.selectedRange()
-                    let state = ChatTextInputState(inputText: attributed.string, selectionRange: range.location ..< range.location + range.length, attributes: chatTextAttributes(from: attributed))
-                    chatInteraction.update({$0.withUpdatedEffectiveInputState(state)})
-                }
-            }
-            
             let text = textView.string().trimmed
             if text.length > chatInteraction.presentation.maxInputCharacters {
                 alert(for: chatInteraction.context.window, info: L10n.chatInputErrorMessageTooLongCountable(text.length - Int(chatInteraction.presentation.maxInputCharacters)))
@@ -576,7 +576,18 @@ class ChatInputView: View, TGModernGrowingDelegate, Notifable {
             current = current.withUpdatedEffectiveInputState(state)
             if let disabledPreview = current.interfaceState.composeDisableUrlPreview {
                 if !current.effectiveInput.inputText.contains(disabledPreview) {
-                    current = current.updatedUrlPreview(nil).updatedInterfaceState {$0.withUpdatedComposeDisableUrlPreview(nil)}
+
+                    var detectedUrl: String?
+                    current.effectiveInput.attributedString.enumerateAttribute(NSAttributedString.Key(rawValue: TGCustomLinkAttributeName), in: current.effectiveInput.attributedString.range, options: NSAttributedString.EnumerationOptions(rawValue: 0), using: { (value, range, stop) in
+                        if let tag = value as? TGInputTextTag, let url = tag.attachment as? String {
+                            detectedUrl = url
+                        }
+                        let s: ObjCBool = (detectedUrl != nil) ? true : false
+                        stop.pointee = s
+                    })
+                    if detectedUrl == nil {
+                        current = current.updatedUrlPreview(nil).updatedInterfaceState {$0.withUpdatedComposeDisableUrlPreview(nil)}
+                    }
                 }
             }
             return current

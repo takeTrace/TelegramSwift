@@ -14,9 +14,9 @@ import Postbox
 import TelegramCore
 import SyncCore
 
-let mediaExts:[String] = ["png","jpg","jpeg","tiff","mp4","mov","avi", "gif"]
+let mediaExts:[String] = ["png","jpg","jpeg","tiff","mp4","mov","avi", "gif", "m4v"]
 let photoExts:[String] = ["png","jpg","jpeg","tiff"]
-let videoExts:[String] = ["mp4","mov","avi"]
+let videoExts:[String] = ["mp4","mov","avi", "m4v"]
 
 
 func filePanel(with exts:[String]? = nil, allowMultiple:Bool = true, canChooseDirectories: Bool = false, for window:Window, completion:@escaping ([String]?)->Void) {
@@ -103,15 +103,18 @@ func savePanel(file:String, ext:String, for window:Window, defaultName: String? 
 //    })
     
 //    
-//    
-    if let editor = savePanel.fieldEditor(false, for: nil) {
-        let exportFilename = savePanel.nameFieldStringValue
-        let ext = exportFilename.nsstring.pathExtension
-        if !ext.isEmpty {
-            let extensionLength = exportFilename.length - ext.length - 1
-            editor.selectedRange = NSMakeRange(0, extensionLength)
-        }
-    }
+//
+//    DispatchQueue.main.async {
+//        if let editor = savePanel.fieldEditor(false, for: nil) {
+//            let exportFilename = savePanel.nameFieldStringValue
+//            let ext = exportFilename.nsstring.pathExtension
+//            if !ext.isEmpty {
+//                let extensionLength = exportFilename.length - ext.length - 1
+//                editor.selectedRange = NSMakeRange(0, extensionLength)
+//            }
+//        }
+//    }
+    
 }
 
 func savePanel(file:String, named:String, for window:Window) {
@@ -127,14 +130,14 @@ func savePanel(file:String, named:String, for window:Window) {
         }
     })
     
-    if let editor = savePanel.fieldEditor(false, for: nil) {
-        let exportFilename = savePanel.nameFieldStringValue
-        let ext = exportFilename.nsstring.pathExtension
-        if !ext.isEmpty {
-            let extensionLength = exportFilename.length - ext.length - 1
-            editor.selectedRange = NSMakeRange(0, extensionLength)
-        }
-    }
+//    if let editor = savePanel.fieldEditor(false, for: nil) {
+//        let exportFilename = savePanel.nameFieldStringValue
+//        let ext = exportFilename.nsstring.pathExtension
+//        if !ext.isEmpty {
+//            let extensionLength = exportFilename.length - ext.length - 1
+//            editor.selectedRange = NSMakeRange(0, extensionLength)
+//        }
+//    }
     
 }
 
@@ -181,7 +184,7 @@ enum ConfirmResult {
     case basic
 }
 
-func confirm(for window:Window, header: String? = nil, information:String?, okTitle:String? = nil, cancelTitle:String = L10n.alertCancel, thridTitle:String? = nil, fourTitle: String? = nil, successHandler:@escaping (ConfirmResult)->Void) {
+func confirm(for window:Window, header: String? = nil, information:String?, okTitle:String? = nil, cancelTitle:String = L10n.alertCancel, thridTitle:String? = nil, fourTitle: String? = nil, successHandler:@escaping (ConfirmResult)->Void, cancelHandler: (()->Void)? = nil) {
 
     
     let alert:NSAlert = NSAlert()
@@ -214,6 +217,8 @@ func confirm(for window:Window, header: String? = nil, information:String?, okTi
                 successHandler(.thrid)
             } else if response.rawValue == 1001, cancelTitle == "" {
                 successHandler(.thrid)
+            } else if response.rawValue == 1001 {
+                cancelHandler?()
             }
         }
     })

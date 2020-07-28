@@ -35,7 +35,6 @@ func initialize() -> [String] {
     array.append("chatFallbackCallBubble_outgoing")
     array.append("chatToggleSelected")
     array.append("chatToggleUnselected")
-    array.append("chatShare")
     array.append("chatMusicPlay")
     array.append("chatMusicPlayBubble_incoming")
     array.append("chatMusicPlayBubble_outgoing")
@@ -171,6 +170,7 @@ func initialize() -> [String] {
     array.append("chatFileThumbBubble_incoming")
     array.append("chatFileThumbBubble_outgoing")
     array.append("chatSecretThumb")
+    array.append("chatSecretThumbSmall")
     array.append("chatMapPin")
     array.append("chatSecretTitle")
     array.append("emptySearch")
@@ -238,6 +238,7 @@ func initialize() -> [String] {
     array.append("settingsSecurity")
     array.append("settingsStickers")
     array.append("settingsStorage")
+    array.append("settingsSessions")
     array.append("settingsProxy")
     array.append("settingsAppearance")
     array.append("settingsPassport")
@@ -252,6 +253,7 @@ func initialize() -> [String] {
     array.append("settingsSecurityActive")
     array.append("settingsStickersActive")
     array.append("settingsStorageActive")
+    array.append("settingsSessionsActive")
     array.append("settingsProxyActive")
     array.append("settingsAppearanceActive")
     array.append("settingsPassportActive")
@@ -279,13 +281,10 @@ func initialize() -> [String] {
     array.append("previewSenderDelete")
     array.append("previewSenderDeleteFile")
     array.append("previewSenderArchive")
-    array.append("chatGoMessage")
     array.append("chatGroupToggleSelected")
     array.append("chatGroupToggleUnselected")
     array.append("successModalProgress")
     array.append("accentColorSelect")
-    array.append("chatShareWallpaper")
-    array.append("chatGotoMessageWallpaper")
     array.append("transparentBackground")
     array.append("lottieTransparentBackground")
     array.append("passcodeTouchId")
@@ -356,8 +355,6 @@ func initialize() -> [String] {
     array.append("galleryZoomIn")
     array.append("galleryZoomOut")
     array.append("editMessageCurrentPhoto")
-    array.append("chatSwipeReply")
-    array.append("chatSwipeReplyWallpaper")
     array.append("videoPlayerPlay")
     array.append("videoPlayerPause")
     array.append("videoPlayerEnterFullScreen")
@@ -501,6 +498,58 @@ func initialize() -> [String] {
     array.append("tab_chats_active_filters")
     array.append("tab_settings")
     array.append("tab_settings_active")
+    
+    
+    array.append("profile_add_member")
+    array.append("profile_call")
+    array.append("profile_leave")
+    array.append("profile_message")
+    array.append("profile_more")
+    array.append("profile_mute")
+    array.append("profile_unmute")
+    array.append("profile_search")
+    array.append("profile_secret_chat")
+    array.append("profile_edit_photo")
+    array.append("profile_block")
+    array.append("profile_report")
+    array.append("profile_share")
+    array.append("profile_stats")
+    array.append("profile_unblock")
+
+    
+    array.append("chat_quiz_explanation")
+    array.append("chat_quiz_explanation_bubble_incoming")
+    array.append("chat_quiz_explanation_bubble_outgoing")
+    
+    
+    array.append("stickers_add_featured")
+    
+    array.append("channel_info_promo")
+    array.append("channel_info_promo_bubble_incoming")
+    array.append("channel_info_promo_bubble_outgoing")
+    
+    array.append("chat_share_message")
+    array.append("chat_goto_message")
+    array.append("chat_swipe_reply")
+    array.append("chat_like_message")
+    array.append("chat_like_message_unlike")
+    
+    array.append("chat_like_inside")
+    array.append("chat_like_inside_bubble_incoming")
+    array.append("chat_like_inside_bubble_outgoing")
+    array.append("chat_like_inside_bubble_overlay")
+    
+    array.append("chat_like_inside_empty")
+    array.append("chat_like_inside_empty_bubble_incoming")
+    array.append("chat_like_inside_empty_bubble_outgoing")
+    array.append("chat_like_inside_empty_bubble_overlay")
+
+    
+    array.append("gif_trending")
+    
+    
+    array.append("chat_list_thumb_play")
+
     
     return array
 }

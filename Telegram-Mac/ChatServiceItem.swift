@@ -13,6 +13,8 @@ import SyncCore
 import Postbox
 import SwiftSignalKit
 class ChatServiceItem: ChatRowItem {
+    
+    static var photoSize = NSMakeSize(200, 200)
 
     let text:TextViewLayout
     private(set) var imageArguments:TransformImageArguments?
@@ -120,12 +122,20 @@ class ChatServiceItem: ChatRowItem {
                     }
                     
                 case let .photoUpdated(image):
-                    if let _ = image {
-                        let _ =  attributedString.append(string: peer.isChannel ? tr(L10n.chatServiceChannelUpdatedPhoto) : tr(L10n.chatServiceGroupUpdatedPhoto(authorName)), color: grayTextColor, font: .normal(theme.fontSize))
-                        let size = NSMakeSize(70, 70)
-                        imageArguments = TransformImageArguments(corners: ImageCorners(radius: size.width / 2), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
+                    if let image = image {
+                        
+                        let text: String
+                        if image.videoRepresentations.isEmpty {
+                            text = peer.isChannel ? L10n.chatServiceChannelUpdatedPhoto : L10n.chatServiceGroupUpdatedPhoto(authorName)
+                        } else {
+                            text = peer.isChannel ? L10n.chatServiceChannelUpdatedVideo : L10n.chatServiceGroupUpdatedVideo(authorName)
+                        }
+                        
+                        let _ =  attributedString.append(string: text, color: grayTextColor, font: .normal(theme.fontSize))
+                        let size = ChatServiceItem.photoSize
+                        imageArguments = TransformImageArguments(corners: ImageCorners(radius: 10), imageSize: size, boundingSize: size, intrinsicInsets: NSEdgeInsets())
                     } else {
-                        let _ =  attributedString.append(string: peer.isChannel ? tr(L10n.chatServiceChannelRemovedPhoto) : tr(L10n.chatServiceGroupRemovedPhoto(authorName)), color: grayTextColor, font: NSFont.normal(theme.fontSize))
+                        let _ =  attributedString.append(string: peer.isChannel ? L10n.chatServiceChannelRemovedPhoto : L10n.chatServiceGroupRemovedPhoto(authorName), color: grayTextColor, font: NSFont.normal(theme.fontSize))
                         
                     }
                     if let authorId = authorId {
@@ -214,7 +224,7 @@ class ChatServiceItem: ChatRowItem {
                         attributedString.add(link:inAppLink.peerInfo(link: "", peerId:authorId, action:nil, openChat: false, postId: nil, callback: chatInteraction.openInfo), for: range, color: nameColor(authorId))
                         attributedString.addAttribute(.font, value: NSFont.medium(theme.fontSize), range: range)
                     }
-                case let .phoneCall(callId: _, discardReason: reason, duration: duration):
+                case let .phoneCall(callId: _, discardReason: reason, duration: duration, _):
                     if let reason = reason {
                         switch reason {
                         case .busy:
@@ -375,6 +385,10 @@ class ChatServiceRowView: TableRowView {
     
     private var textView:TextView
     private var imageView:TransformImageView?
+    
+    private var photoVideoView: MediaPlayerView?
+    private var photoVideoPlayer: MediaPlayer?
+    
     required init(frame frameRect: NSRect) {
         textView = TextView()
         textView.isSelectable = false
@@ -408,6 +422,7 @@ class ChatServiceRowView: TableRowView {
                 imageView?.setFrameSize(imageArguments.imageSize)
                 imageView?.centerX(y:textView.frame.maxY + (item.isBubbled ? 0 : 6))
                 self.imageView?.set(arguments: imageArguments)
+                self.photoVideoView?.centerX(y:textView.frame.maxY + (item.isBubbled ? 0 : 6))
             }
             
         }
@@ -421,6 +436,61 @@ class ChatServiceRowView: TableRowView {
             }
         }
     }
+    
+    
+    @objc func updatePlayerIfNeeded() {
+        let accept = window != nil && window!.isKeyWindow && !NSIsEmptyRect(visibleRect) && !self.isDynamicContentLocked
+        if let photoVideoPlayer = photoVideoPlayer {
+            if accept {
+                photoVideoPlayer.play()
+            } else {
+                photoVideoPlayer.pause()
+            }
+        }
+    }
+    
+    override func addAccesoryOnCopiedView(innerId: AnyHashable, view: NSView) {
+        photoVideoPlayer?.seek(timestamp: 0)
+    }
+    
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateListeners()
+        updatePlayerIfNeeded()
+    }
+    
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        updateListeners()
+        updatePlayerIfNeeded()
+    }
+    
+    override func viewDidUpdatedDynamicContent() {
+        super.viewDidUpdatedDynamicContent()
+        updatePlayerIfNeeded()
+    }
+    
+    func updateListeners() {
+        if let window = window {
+            NotificationCenter.default.removeObserver(self)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didBecomeKeyNotification, object: window)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didResignKeyNotification, object: window)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.boundsDidChangeNotification, object: item?.table?.clipView)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.boundsDidChangeNotification, object: self)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.frameDidChangeNotification, object: item?.table?.view)
+        } else {
+            removeNotificationListeners()
+        }
+    }
+    
+    func removeNotificationListeners() {
+        NotificationCenter.default.removeObserver(self)
+    }
+    
+    deinit {
+        removeNotificationListeners()
+    }
+    
     
     override func mouseUp(with event: NSEvent) {
         if let imageView = imageView, imageView._mouseInside() {
@@ -436,19 +506,20 @@ class ChatServiceRowView: TableRowView {
         return imageView ?? self
     }
     
+    
     override func set(item: TableRowItem, animated: Bool) {
         super.set(item: item, animated:animated)
         textView.disableBackgroundDrawing = true
-
         
         if let item = item as? ChatServiceItem, let arguments = item.imageArguments {
+            
             if let image = item.image {
                 if imageView == nil {
                     self.imageView = TransformImageView()
                     self.addSubview(imageView!)
                 }
                 imageView?.setSignal(signal: cachedMedia(media: image, arguments: arguments, scale: backingScaleFactor))
-                imageView?.setSignal( chatMessagePhoto(account: item.context.account, imageReference: ImageMediaReference.message(message: MessageReference(item.message!), media: image), toRepresentationSize:NSMakeSize(100,100), scale: backingScaleFactor), cacheImage: { [weak image] result in
+                imageView?.setSignal( chatMessagePhoto(account: item.context.account, imageReference: ImageMediaReference.message(message: MessageReference(item.message!), media: image), toRepresentationSize:NSMakeSize(100,100), scale: backingScaleFactor, autoFetchFullSize: true), cacheImage: { [weak image] result in
                     if let media = image {
                         cacheMedia(result, media: media, arguments: arguments, scale: System.backingScale, positionFlags: nil)
                     }
@@ -456,11 +527,41 @@ class ChatServiceRowView: TableRowView {
                 
                 
                 imageView?.set(arguments: arguments)
+                
+                
+                if let video = image.videoRepresentations.last {
+                    if self.photoVideoView == nil {
+                        self.photoVideoView = MediaPlayerView()
+                        self.photoVideoView!.layer?.cornerRadius = 10
+                        self.addSubview(self.photoVideoView!)
+                        self.photoVideoView!.isEventLess = true
+                    }
+                    self.photoVideoView!.frame = NSMakeRect(0, 0, ChatServiceItem.photoSize.width, ChatServiceItem.photoSize.height)
+                    
+                    let file = TelegramMediaFile(fileId: MediaId(namespace: 0, id: 0), partialReference: nil, resource: video.resource, previewRepresentations: image.representations, videoThumbnails: [], immediateThumbnailData: nil, mimeType: "video/mp4", size: video.resource.size, attributes: [])
+                    
+                    let mediaPlayer = MediaPlayer(postbox: item.context.account.postbox, reference: MediaResourceReference.standalone(resource: file.resource), streamable: true, video: true, preferSoftwareDecoding: false, enableSound: false, fetchAutomatically: true)
+                    
+                    mediaPlayer.actionAtEnd = .loop(nil)
+                    self.photoVideoPlayer = mediaPlayer
+                    mediaPlayer.play()
+                    
+                    if let seekTo = video.startTimestamp {
+                        mediaPlayer.seek(timestamp: seekTo)
+                    }
+                    mediaPlayer.attachPlayerView(self.photoVideoView!)
+                    
+                } else {
+                    self.photoVideoView?.removeFromSuperview()
+                    self.photoVideoView = nil
+                }
+                
             } else {
                 imageView?.removeFromSuperview()
                 imageView = nil
             }
             self.needsLayout = true
+            updateListeners()
         }
     }
     

@@ -31,6 +31,13 @@ final class UpdateTabView : Control {
             textView.isHidden = isInstalling || layoutState == .minimisize
             progressView.isHidden = !isInstalling
             imageView.isHidden = isInstalling || layoutState != .minimisize
+            
+            if layoutState != .minimisize, isInstalling, let superview = self.superview {
+                change(size: NSMakeSize(60, frame.height), animated: true, timingFunction: .spring)
+                change(pos: NSMakePoint(superview.bounds.focus(self.frame.size).minX, self.frame.minY), animated: true, timingFunction: .spring)
+                progressView.change(pos: self.bounds.focus(progressView.frame.size).origin, animated: true, timingFunction: .spring)
+            }
+            
         }
     }
     
@@ -53,7 +60,7 @@ final class UpdateTabView : Control {
         progressView.progressColor = .white
         isInstalling = false
         
-        let layout = TextViewLayout(.initialize(string: L10n.updateUpdateTelegram, color: .white, font: .medium(.title)))
+        let layout = TextViewLayout(.initialize(string: L10n.updateUpdateTelegram, color: theme.colors.underSelectedColor, font: .medium(.title)))
         layout.measure(width: max(280, frame.width))
         textView.update(layout)
         
@@ -179,6 +186,10 @@ final class UpdateTabController: GenericViewController<UpdateTabView> {
         }))
         
         genericView.set(handler: { _ in
+            let authrorized = (NSApp.delegate as? AppDelegate)?.hasAuthorized ?? false
+            if authrorized, let controller = context.bindings.rootNavigation().controller as? ChatController {
+                controller.chatInteraction.saveState(true)
+            }
             updateApplication(sharedContext: context)
         }, for: .Click)
     }
@@ -192,10 +203,12 @@ final class UpdateTabController: GenericViewController<UpdateTabView> {
     func updateLayout(_ layout: SplitViewState, parentSize: NSSize, isChatList: Bool) {
         genericView.layoutState = layout
         
+        let bottom = parentSize.height - genericView.frame.height
+        
         if isChatList && layout != .minimisize {
             genericView.setFrameSize(NSMakeSize(genericView.textView.frame.width + 40, 40))
             genericView.layer?.cornerRadius = genericView.frame.height / 2
-            genericView.centerX(y: layout == .minimisize ? 10 : 60)
+            genericView.centerX(y: layout == .minimisize ? bottom - 10 : bottom - 60)
             
             var shakeDelay: Double = 60 * 60
            
@@ -206,7 +219,7 @@ final class UpdateTabController: GenericViewController<UpdateTabView> {
             }))
         } else {
             genericView.setFrameSize(NSMakeSize(parentSize.width, 50))
-            genericView.setFrameOrigin(NSMakePoint(0, layout == .minimisize ? 0 : 50))
+            genericView.setFrameOrigin(NSMakePoint(0, layout == .minimisize ? bottom : bottom - 50))
             genericView.layer?.cornerRadius = 0
             shakeDisposable.set(nil)
         }
@@ -356,19 +369,23 @@ class MainViewController: TelegramViewController {
         }))
     }
     
-    private func _showFastChatSettings(_ control: Control, items: [SPopoverItem]) {
+    private func _showFastChatSettings(_ control: Control, unreadCount: Int32) {
+        var items: [SPopoverItem] = []
+        let context = self.context
         
-        switch self.chatList.mode {
-        case .plain, .filter:
-            if self.tabController.current == chatListNavigation, !items.isEmpty {
-                if let popover = control.popover {
-                    popover.hide()
-                } else {
-                    showPopover(for: control, with: SPopoverViewController(items: items, visibility: 10), edge: .maxX, inset: NSMakePoint(control.frame.width + 40, 0))
-                }
-            }
-        default:
-            break
+        if unreadCount > 0 {
+            items.append(SPopoverItem(L10n.chatListPopoverReadAll, {
+                confirm(for: context.window, information: L10n.chatListPopoverConfirm, successHandler: { _ in
+                    _ = context.account.postbox.transaction ({ transaction -> Void in
+                        markAllChatsAsReadInteractively(transaction: transaction, viewTracker: context.account.viewTracker, groupId: .root, filterPredicate: nil)
+                        markAllChatsAsReadInteractively(transaction: transaction, viewTracker: context.account.viewTracker, groupId: Namespaces.PeerGroup.archive, filterPredicate: nil)
+                    }).start()
+                })
+            }))
+        }
+        
+        if self.tabController.current == chatListNavigation, !items.isEmpty {
+            showPopover(for: control, with: SPopoverViewController(items: items), edge: .maxX, inset: NSMakePoint(control.frame.width + 12, 0))
         }
     }
     
@@ -378,9 +395,23 @@ class MainViewController: TelegramViewController {
     
     private func showFastChatSettings(_ control: Control) {
         
-        filterMenuDisposable.set(self.chatList.filterMenuItems.start(next: { [weak self] items in
-            self?._showFastChatSettings(control, items: items)
-        }))
+        let context = self.context
+        let unreadCountsKey = PostboxViewKey.unreadCounts(items: [.total(nil)])
+        
+        _ = (context.account.postbox.combinedView(keys: [unreadCountsKey]) |> take(1) |> deliverOnMainQueue).start(next: { [weak self, weak control] view in
+            let totalUnreadState: ChatListTotalUnreadState
+            if let value = view.views[unreadCountsKey] as? UnreadMessageCountsView, let (_, total) = value.total() {
+                totalUnreadState = total
+            } else {
+                totalUnreadState = ChatListTotalUnreadState(absoluteCounters: [:], filteredCounters: [:])
+            }
+            let total = totalUnreadState.absoluteCounters.reduce(0, { current, value in
+                return current + value.value.messageCount
+            })
+            if let control = control {
+                self?._showFastChatSettings(control, unreadCount: total)
+            }
+        })
     }
     private let filterMenuDisposable = MetaDisposable()
     private let settingsDisposable = MetaDisposable()
@@ -633,12 +664,21 @@ class MainViewController: TelegramViewController {
         }
     }
     
+    func showChatList() {
+       self.tabController.select(index: self.chatIndex)
+    }
+    
     override var responderPriority: HandlerPriority {
         return context.sharedContext.layout == .single ? .medium : .low
     }
     
     func isCanMinimisize() -> Bool{
-        return self.tabController.current == chatListNavigation
+        return self.tabController.current == chatListNavigation || self.tabController.current == contacts || self.tabController.current == self.phoneCalls
+    }
+    
+    override func updateFrame(_ frame: NSRect, animated: Bool) {
+        super.updateFrame(frame, animated: animated)
+        self.tabController.updateFrame(frame, animated: animated)
     }
     
     override init(_ context: AccountContext) {

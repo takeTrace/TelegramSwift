@@ -34,16 +34,30 @@ class PeerPhotosMonthItem: GeneralRowItem {
     fileprivate private(set) var itemSize: NSSize = NSZeroSize
     fileprivate let chatInteraction: ChatInteraction
     fileprivate let gallerySupplyment: InteractionContentViewProtocol
-    init(_ initialSize: NSSize, stableId: AnyHashable, context: AccountContext, chatInteraction: ChatInteraction, gallerySupplyment: InteractionContentViewProtocol, items: [Message]) {
+    init(_ initialSize: NSSize, stableId: AnyHashable, viewType: GeneralViewType, context: AccountContext, chatInteraction: ChatInteraction, gallerySupplyment: InteractionContentViewProtocol, items: [Message]) {
         self.items = items
         self.context = context
         self.gallerySupplyment = gallerySupplyment
         self.chatInteraction = chatInteraction
-        super.init(initialSize, stableId: stableId, viewType: .modern(position: .single, insets: NSEdgeInsetsMake(7, 7, 7, 7)))
+        
+        super.init(initialSize, stableId: stableId, viewType: viewType, inset: NSEdgeInsets())
     }
     
     override func makeSize(_ width: CGFloat, oldWidth: CGFloat = 0) -> Bool {
         _ = super.makeSize(width, oldWidth: oldWidth)
+        
+        
+        if !items.isEmpty {
+            var t: time_t = time_t(TimeInterval(items[0].timestamp))
+            var timeinfo: tm = tm()
+            localtime_r(&t, &timeinfo)
+            
+            if timeinfo.tm_mon == 2 {
+                var bp:Int = 0
+                bp += 1
+            }
+            
+        }
         
         var rowCount:Int = 4
         var perWidth: CGFloat = 0
@@ -58,12 +72,21 @@ class PeerPhotosMonthItem: GeneralRowItem {
         }
         assert(rowCount >= 1)
                 
-        let itemSize = NSMakeSize(perWidth + 2, perWidth + 2)
+        let itemSize = NSMakeSize(ceil(perWidth) + 2, ceil(perWidth) + 2)
         
         layoutItems.removeAll()
-        var point: CGPoint = CGPoint(x: self.viewType.innerInset.top, y: self.viewType.innerInset.left + itemSize.height)
+        var point: CGPoint = CGPoint(x: self.viewType.innerInset.left, y: self.viewType.innerInset.top + itemSize.height)
         for (i, message) in self.items.enumerated() {
-            let viewType = message.media.first is TelegramMediaFile ? MediaVideoCell.self : MediaPhotoCell.self
+            let viewType: MediaCell.Type
+            if let file = message.media.first as? TelegramMediaFile {
+                if file.isAnimated && file.isVideo {
+                    viewType = MediaGifCell.self
+                } else {
+                    viewType = MediaVideoCell.self
+                }
+            } else {
+                viewType = MediaPhotoCell.self
+            }
             
             var topLeft: ImageCorner = .Corner(0)
             var topRight: ImageCorner = .Corner(0)
@@ -72,16 +95,22 @@ class PeerPhotosMonthItem: GeneralRowItem {
             
             if self.items.count < rowCount {
                 if message == self.items.first {
-                    topLeft = .Corner(.cornerRadius)
+                    if self.viewType.position != .last {
+                        topLeft = .Corner(.cornerRadius)
+                    }
                     bottomLeft = .Corner(.cornerRadius)
                 }
             } else if self.items.count == rowCount {
                 if message == self.items.first {
-                    topLeft = .Corner(.cornerRadius)
+                    if self.viewType.position != .last {
+                        topLeft = .Corner(.cornerRadius)
+                    }
                     bottomLeft = .Corner(.cornerRadius)
                 } else if message == self.items.last {
                     if message == self.items.last {
-                        topRight = .Corner(.cornerRadius)
+                        if self.viewType.position != .last {
+                            topRight = .Corner(.cornerRadius)
+                        }
                         bottomRight = .Corner(.cornerRadius)
                     }
                 }
@@ -92,10 +121,12 @@ class PeerPhotosMonthItem: GeneralRowItem {
                 let lastLine = i > (items.count - div)
                 
                 if firstLine {
-                    if i % rowCount == 1 {
-                        topLeft = .Corner(.cornerRadius)
-                    } else if i % rowCount == 0 {
-                        topRight = .Corner(.cornerRadius)
+                    if self.viewType.position != .last {
+                        if i % rowCount == 1 {
+                            topLeft = .Corner(.cornerRadius)
+                        } else if i % rowCount == 0 {
+                            topRight = .Corner(.cornerRadius)
+                        }
                     }
                 } else if lastLine {
                     if i % rowCount == 1 {
@@ -133,8 +164,7 @@ class PeerPhotosMonthItem: GeneralRowItem {
     }
     
     deinit {
-        var bp:Int = 0
-        bp += 1
+
     }
     
     override func viewClass() -> AnyClass {
@@ -166,7 +196,7 @@ class PeerPhotosMonthItem: GeneralRowItem {
 
 private class MediaCell : Control {
     private var selectionView:SelectingControl?
-    private let imageView: TransformImageView
+    fileprivate let imageView: TransformImageView
     private(set) var layoutItem: LayoutItem?
     fileprivate var context: AccountContext?
     required init(frame frameRect: NSRect) {
@@ -176,11 +206,20 @@ private class MediaCell : Control {
         userInteractionEnabled = false
     }
     
-    func update(layout: LayoutItem, context: AccountContext) {
+    override func mouseMoved(with event: NSEvent) {
+        superview?.superview?.mouseMoved(with: event)
+    }
+    override func mouseEntered(with event: NSEvent) {
+        superview?.superview?.mouseEntered(with: event)
+    }
+    override func mouseExited(with event: NSEvent) {
+        superview?.superview?.mouseExited(with: event)
+    }
+    func update(layout: LayoutItem, context: AccountContext, table: TableView?) {
         let previousLayout = self.layoutItem
         self.layoutItem = layout
         self.context = context
-        if previousLayout != layout {
+        if previousLayout != layout, !(self is MediaGifCell) {
             let media: Media
             let imageSize: NSSize
             let arguments: TransformImageArguments
@@ -225,6 +264,10 @@ private class MediaCell : Control {
     }
     
     func addAccesoryOnCopiedView(view: NSView) {
+        
+    }
+    
+    func updateMouse(_ inside: Bool) {
         
     }
     
@@ -284,18 +327,131 @@ private enum InvokeActionResult {
     case gallery
 }
 
+
+
 private final class MediaVideoCell : MediaCell {
+    
+    
+    private final class VideoAutoplayView {
+        let mediaPlayer: MediaPlayer
+        let view: MediaPlayerView
+        
+        fileprivate var playTimer: SwiftSignalKit.Timer?
+        var status: MediaPlayerStatus?
+        
+        init(mediaPlayer: MediaPlayer, view: MediaPlayerView) {
+            self.mediaPlayer = mediaPlayer
+            self.view = view
+            mediaPlayer.actionAtEnd = .loop(nil)
+        }
+        
+        deinit {
+            view.removeFromSuperview()
+            playTimer?.invalidate()
+        }
+    }
+    
+    private let mediaPlayerStatusDisposable = MetaDisposable()
+    
     private let progressView:RadialProgressView = RadialProgressView(theme: RadialProgressTheme(backgroundColor: .blackTransparent, foregroundColor: .white, icon: playerPlayThumb))
     private let videoAccessory: ChatMessageAccessoryView = ChatMessageAccessoryView(frame: NSZeroRect)
     private var status:MediaResourceStatus?
+    private var authenticStatus: MediaResourceStatus?
     private let statusDisposable = MetaDisposable()
     private let fetchingDisposable = MetaDisposable()
     private let partDisposable = MetaDisposable()
+    
+    private var videoView:VideoAutoplayView?
+    
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         self.addSubview(self.videoAccessory)
         self.progressView.userInteractionEnabled = false
         self.addSubview(self.progressView)
+    }
+    
+    override func updateMouse(_ inside: Bool) {
+        if let layout = self.layoutItem {
+            let file = layout.message.media.first as! TelegramMediaFile
+            if inside {
+                if file.isStreamable {
+                    if videoView == nil {
+                        let context = layout.chatInteraction.context
+                        let player = MediaPlayer(postbox: context.account.postbox, reference: MediaResourceReference.media(media: AnyMediaReference.message(message: MessageReference(layout.message), media: file), resource: file.resource), streamable: true, video: true, preferSoftwareDecoding: true, enableSound: false, fetchAutomatically: false)
+                        videoView = MediaVideoCell.VideoAutoplayView(mediaPlayer: player, view: MediaPlayerView(backgroundThread: true))
+                        
+                        videoView?.view.setVideoLayerGravity(.resizeAspectFill)
+                        
+                        var posititionFlags: LayoutPositionFlags = []
+                        if layout.corners.topLeft.corner > 0 {
+                            posititionFlags.insert(.top)
+                            posititionFlags.insert(.left)
+                        }
+                        if layout.corners.topRight.corner > 0 {
+                            posititionFlags.insert(.top)
+                            posititionFlags.insert(.right)
+                        }
+                        if layout.corners.bottomLeft.corner > 0 {
+                            posititionFlags.insert(.bottom)
+                            posititionFlags.insert(.left)
+                        }
+                        if layout.corners.bottomRight.corner > 0 {
+                            posititionFlags.insert(.bottom)
+                            posititionFlags.insert(.right)
+                        }
+                        videoView?.view.positionFlags = posititionFlags.isEmpty ? nil : posititionFlags
+                        videoView?.view.frame = self.imageView.frame
+                        
+                        videoView!.mediaPlayer.attachPlayerView(videoView!.view)
+                        
+                        videoView?.mediaPlayer.play()
+                        
+                        
+                        self.addSubview(videoView!.view, positioned: .above, relativeTo: self.imageView)
+                        
+                        progressView.change(opacity: 0)
+                    }
+                    if let videoView = videoView {
+                        mediaPlayerStatusDisposable.set((videoView.mediaPlayer.status |> deliverOnMainQueue).start(next: { [weak self] status in
+                            self?.updateMediaStatus(status, animated: true)
+                        }))
+                    }
+                    
+                    
+                } else {
+                    progressView.change(opacity: 1)
+                    videoView = nil
+                    mediaPlayerStatusDisposable.set(nil)
+                    updateVideoAccessory(self.authenticStatus ?? .Remote, mediaPlayerStatus: nil, file: file, animated: true)
+                }
+            } else {
+                progressView.change(opacity: 1)
+                videoView = nil
+                mediaPlayerStatusDisposable.set(nil)
+                updateVideoAccessory(self.authenticStatus ?? .Remote, mediaPlayerStatus: nil, file: file, animated: true)
+            }
+        }
+    }
+    
+    private func updateMediaStatus(_ status: MediaPlayerStatus, animated: Bool = false) {
+        if let videoView = videoView, let media = self.layoutItem?.message.media.first as? TelegramMediaFile {
+            videoView.status = status
+            updateVideoAccessory(self.authenticStatus ?? .Local, mediaPlayerStatus: status, file: media, animated: animated)
+            
+            switch status.status {
+            case .playing:
+                videoView.playTimer?.invalidate()
+                videoView.playTimer = SwiftSignalKit.Timer(timeout: 0.5, repeat: true, completion: { [weak self] in
+                    self?.updateVideoAccessory(self?.authenticStatus ?? .Local, mediaPlayerStatus: status, file: media, animated: animated)
+                }, queue: .mainQueue())
+                
+                videoView.playTimer?.start()
+            default:
+                videoView.playTimer?.invalidate()
+            }
+            
+            
+        }
     }
     
     required init?(coder: NSCoder) {
@@ -347,10 +503,18 @@ private final class MediaVideoCell : MediaCell {
         }
     }
     
-    private func updateVideoAccessory(_ status: MediaResourceStatus, file: TelegramMediaFile, animated: Bool) {
+    private func updateVideoAccessory(_ status: MediaResourceStatus, mediaPlayerStatus: MediaPlayerStatus? = nil, file: TelegramMediaFile, animated: Bool) {
         let maxWidth = frame.width - 10
         let text: String
-        text = String.durationTransformed(elapsed: file.videoDuration)
+        
+        let status: MediaResourceStatus = .Local
+        
+        
+        if let status = mediaPlayerStatus, status.generationTimestamp > 0, status.duration > 0 {
+            text = String.durationTransformed(elapsed: Int(status.duration - (status.timestamp + (CACurrentMediaTime() - status.generationTimestamp))))
+        } else {
+            text = String.durationTransformed(elapsed: file.videoDuration)
+        }
         
         videoAccessory.updateText(text, maxWidth: maxWidth, status: status, isStreamable: file.isStreamable, isCompact: true, animated: animated, fetch: { [weak self] in
             self?.fetch()
@@ -360,8 +524,8 @@ private final class MediaVideoCell : MediaCell {
         needsLayout = true
     }
     
-    override func update(layout: LayoutItem, context: AccountContext) {
-        super.update(layout: layout, context: context)
+    override func update(layout: LayoutItem, context: AccountContext, table: TableView?) {
+        super.update(layout: layout, context: context, table: table)
         
         let file = layout.message.media.first as! TelegramMediaFile
         
@@ -377,10 +541,10 @@ private final class MediaVideoCell : MediaCell {
        statusDisposable.set(updatedStatusSignal.start(next: { [weak self] status, authentic in
            guard let `self` = self else {return}
            
-           self.updateVideoAccessory(authentic, file: file, animated: !first)
+            self.updateVideoAccessory(authentic, mediaPlayerStatus: self.videoView?.status, file: file, animated: !first)
            first = false
            self.status = status
-           
+           self.authenticStatus = authentic
            let progressStatus: MediaResourceStatus
            switch authentic {
            case .Fetching:
@@ -421,15 +585,89 @@ private final class MediaVideoCell : MediaCell {
         super.layout()
         progressView.center()
         videoAccessory.setFrameOrigin(5, 5)
+        videoView?.view.frame = self.imageView.frame
     }
     
     deinit {
         statusDisposable.dispose()
         fetchingDisposable.dispose()
         partDisposable.dispose()
+        mediaPlayerStatusDisposable.dispose()
     }
 }
 
+
+
+private final class MediaGifCell : MediaCell {
+    private let gifView: GIFContainerView = GIFContainerView(frame: .zero)
+    private var status:MediaResourceStatus?
+    private let statusDisposable = MetaDisposable()
+    private let fetchingDisposable = MetaDisposable()
+    required init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        self.addSubview(self.gifView)
+
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func fetch() {
+        
+    }
+    
+    private func cancelFetching() {
+
+    }
+    
+    override func innerAction() -> InvokeActionResult {
+        return .gallery
+    }
+    
+
+    override func copy() -> Any {
+        return gifView.copy()
+    }
+    
+    override func update(layout: LayoutItem, context: AccountContext, table: TableView?) {
+        let previousLayout = self.layoutItem
+        super.update(layout: layout, context: context, table: table)
+        if layout != previousLayout {
+            let file = layout.message.media.first as! TelegramMediaFile
+            
+            let messageRefence = MessageReference(layout.message)
+            
+            let reference = FileMediaReference.message(message: messageRefence, media: file)            
+            
+            var effectiveFile = reference
+            if let preview = file.videoThumbnails.first {
+                let updated = file.withUpdatedResource(preview.resource)
+                effectiveFile = FileMediaReference.message(message: messageRefence, media: updated)
+            }
+            let signal = chatMessageVideo(postbox: context.account.postbox, fileReference: effectiveFile, scale: backingScaleFactor)
+
+            
+            gifView.update(with: reference, size: frame.size, viewSize: frame.size, context: context, table: nil, iconSignal: signal)
+            gifView.userInteractionEnabled = false
+            
+        }
+        
+    
+    }
+    
+    
+    override func layout() {
+        super.layout()
+        gifView.frame = NSMakeRect(1, 1, frame.width - 2, frame.height - 2)
+        
+    }
+    
+    deinit {
+        statusDisposable.dispose()
+        fetchingDisposable.dispose()
+    }
+}
 
 
 private final class PeerPhotosMonthView : TableRowView, Notifable {
@@ -444,7 +682,6 @@ private final class PeerPhotosMonthView : TableRowView, Notifable {
             self?.action(event: .Down)
         }, for: .Down)
         
-        
         containerView.set(handler: { [weak self] _ in
             self?.action(event: .MouseDragging)
         }, for: .MouseDragging)
@@ -456,7 +693,40 @@ private final class PeerPhotosMonthView : TableRowView, Notifable {
     
     private var haveToSelectOnDrag: Bool = false
     
-
+    
+    private weak var currentMouseCell: MediaCell?
+    
+    @objc override func updateMouse() {
+        super.updateMouse()
+        guard let window = self.window else {
+            return
+        }
+        let point = self.containerView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let mediaCell = self.contentViews.first(where: {
+            return $0 != nil && NSPointInRect(point, $0!.frame)
+        })?.map { $0 }
+        
+        if currentMouseCell != mediaCell {
+            currentMouseCell?.updateMouse(false)
+        }
+        currentMouseCell = mediaCell
+        mediaCell?.updateMouse(window.isKeyWindow)
+        
+    }
+    
+    
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        updateMouse()
+    }
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        updateMouse()
+    }
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        updateMouse()
+    }
     
     private func action(event: ControlEvent) {
         guard let item = self.item as? PeerPhotosMonthItem, let window = window else {
@@ -600,7 +870,7 @@ private final class PeerPhotosMonthView : TableRowView, Notifable {
                 } else {
                     view = self.contentViews[i]!
                 }
-                view.update(layout: layout, context: item.context)
+                view.update(layout: layout, context: item.context, table: item.table)
 
                 view.frame = layout.frame
             } else {
@@ -630,6 +900,8 @@ private final class PeerPhotosMonthView : TableRowView, Notifable {
              NotificationCenter.default.removeObserver(self)
          } else {
              NotificationCenter.default.addObserver(self, selector: #selector(updateVisibleItems), name: NSView.boundsDidChangeNotification, object: self.enclosingScrollView?.contentView)
+            NotificationCenter.default.addObserver(self, selector: #selector(updateMouse), name: NSWindow.didBecomeKeyNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(updateMouse), name: NSWindow.didResignKeyNotification, object: nil)
          }
          updateVisibleItems()
      }
@@ -648,7 +920,7 @@ private final class PeerPhotosMonthView : TableRowView, Notifable {
     override func interactionContentView(for innerId: AnyHashable, animateIn: Bool) -> NSView {
         if let innerId = innerId.base as? MessageId {
             let view = contentViews.compactMap { $0 }.first(where: { $0.layoutItem?.message.id == innerId })
-            return view ?? self
+            return view ?? NSView()
         }
         return self
     }

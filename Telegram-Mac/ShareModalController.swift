@@ -340,7 +340,7 @@ class ShareObject {
 class ShareLinkObject : ShareObject {
     let link:String
     init(_ context: AccountContext, link:String) {
-        self.link = link
+        self.link = link.removingPercentEncoding ?? link
         super.init(context)
     }
     
@@ -410,16 +410,18 @@ class ShareMessageObject : ShareObject {
     init(_ context: AccountContext, _ message:Message, _ groupMessages:[Message] = []) {
         self.messageIds = groupMessages.isEmpty ? [message.id] : groupMessages.map{$0.id}
         self.message = message
-        let peer = messageMainPeer(message) as? TelegramChannel
-//        if let author = message.forwardInfo?.author as? TelegramChannel {
-//            peer = author
-//        } else {
-//            peer = messageMainPeer(message) as? TelegramChannel
-//        }
+        var peer = messageMainPeer(message) as? TelegramChannel
+        var messageId = message.id
+        if let author = message.forwardInfo?.author as? TelegramChannel {
+            peer = author
+            messageId = message.forwardInfo?.sourceMessageId ?? message.id
+        }
+        //            peer = messageMainPeer(message) as? TelegramChannel
+        //        }
         if let peer = peer, let address = peer.username {
             switch peer.info {
             case .broadcast:
-                self.link = "https://t.me/" + address + "/" + "\(message.id.id)"
+                self.link = "https://t.me/" + address + "/" + "\(messageId.id)"
             default:
                 self.link = nil
             }
@@ -454,6 +456,7 @@ class ShareMessageObject : ShareObject {
             if let comment = comment?.trimmed, !comment.isEmpty {
                 _ = Sender.enqueue(message: EnqueueMessage.message(text: comment, attributes: [], mediaReference: nil, replyToMessageId: nil, localGroupingKey: nil), context: context, peerId: peerId).start()
             }
+            
             _ = Sender.forwardMessages(messageIds: messageIds, context: context, peerId: peerId).start()
         }
         return .complete()
@@ -650,7 +653,7 @@ fileprivate func prepareEntries(from:[SelectablePeersEntry]?, to:[SelectablePeer
                selectInteraction.action(peer.id)
             })
         case let .secretChat(peer, peerId, _, _, drawSeparator):
-            return  ShortPeerRowItem(initialSize, peer: peer, account :account, stableId: entry.stableId, height: 48, photoSize:NSMakeSize(36, 36), titleStyle: ControlStyle(font: .medium(.title), foregroundColor: theme.colors.accent, highlightColor: .white), statusStyle: ControlStyle(font: .normal(.text), foregroundColor: theme.colors.grayText, highlightColor:.white), status: L10n.composeSelectSecretChat.lowercased(), drawCustomSeparator: drawSeparator, isLookSavedMessage : peer.id == account.peerId, inset:NSEdgeInsets(left: 10, right: 10), drawSeparatorIgnoringInset: true, interactionType: multipleSelection ? .selectable(selectInteraction) : .plain, action: {
+            return  ShortPeerRowItem(initialSize, peer: peer, account :account, peerId: peerId, stableId: entry.stableId, height: 48, photoSize:NSMakeSize(36, 36), titleStyle: ControlStyle(font: .medium(.title), foregroundColor: theme.colors.accent, highlightColor: .white), statusStyle: ControlStyle(font: .normal(.text), foregroundColor: theme.colors.grayText, highlightColor:.white), status: L10n.composeSelectSecretChat.lowercased(), drawCustomSeparator: drawSeparator, isLookSavedMessage : peer.id == account.peerId, inset:NSEdgeInsets(left: 10, right: 10), drawSeparatorIgnoringInset: true, interactionType: multipleSelection ? .selectable(selectInteraction) : .plain, action: {
                 selectInteraction.action(peerId)
             })
         case let .separator(text, _):
@@ -1284,7 +1287,7 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
     
     private func invoke() -> KeyHandlerResult {
         if !genericView.tokenizedView.query.isEmpty {
-            if genericView.tableView.count == 1, let item = genericView.tableView.item(at: 0) as? ShortPeerRowItem {
+            if !genericView.tableView.isEmpty, let item = genericView.tableView.item(at: 0) as? ShortPeerRowItem {
                 selectInteractions.update({$0.withToggledSelected(item.peer.id, peer: item.peer)})
             }
             return .invoked
@@ -1407,7 +1410,7 @@ class ShareModalController: ModalViewController, Notifable, TGModernGrowingDeleg
     
     init(_ share:ShareObject) {
         self.share = share
-        emoji = EmojiViewController(share.context, search: .single(SearchState(state: .None, request: nil)))
+        emoji = EmojiViewController(share.context)
         super.init(frame: NSMakeRect(0, 0, 360, 400))
         bar = .init(height: 0)
     }

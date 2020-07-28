@@ -189,13 +189,13 @@ public final class TextViewInteractions {
     public var processURL:(Any)->Void // link, isPresent
     public var copy:(()->Bool)?
     public var menuItems:((LinkType?)->Signal<[ContextMenuItem], NoError>)?
-    public var isDomainLink:(Any)->Bool
+    public var isDomainLink:(Any, String?)->Bool
     public var makeLinkType:((Any, String))->LinkType
     public var localizeLinkCopy:(LinkType)-> String
     public var resolveLink:(Any)->String?
     public var copyAttributedString:(NSAttributedString)->Bool
     public var copyToClipboard:((String)->Void)?
-    public init(processURL:@escaping (Any)->Void = {_ in}, copy:(()-> Bool)? = nil, menuItems:((LinkType?)->Signal<[ContextMenuItem], NoError>)? = nil, isDomainLink:@escaping(Any)->Bool = {_ in return true}, makeLinkType:@escaping((Any, String)) -> LinkType = {_ in return .plain}, localizeLinkCopy:@escaping(LinkType)-> String = {_ in return localizedString("Text.Copy")}, resolveLink: @escaping(Any)->String? = { _ in return nil }, copyAttributedString: @escaping(NSAttributedString)->Bool = { _ in return false}, copyToClipboard: ((String)->Void)? = nil) {
+    public init(processURL:@escaping (Any)->Void = {_ in}, copy:(()-> Bool)? = nil, menuItems:((LinkType?)->Signal<[ContextMenuItem], NoError>)? = nil, isDomainLink:@escaping(Any, String?)->Bool = {_, _ in return true}, makeLinkType:@escaping((Any, String)) -> LinkType = {_ in return .plain}, localizeLinkCopy:@escaping(LinkType)-> String = {_ in return localizedString("Text.Copy")}, resolveLink: @escaping(Any)->String? = { _ in return nil }, copyAttributedString: @escaping(NSAttributedString)->Bool = { _ in return false}, copyToClipboard: ((String)->Void)? = nil) {
         self.processURL = processURL
         self.copy = copy
         self.menuItems = menuItems
@@ -239,19 +239,19 @@ public final class TextViewLine {
 public enum TextViewCutoutPosition {
     case TopLeft
     case TopRight
+    case BottomRight
 }
 
 public struct TextViewCutout: Equatable {
-    public let position: TextViewCutoutPosition
-    public let size: NSSize
-    public init(position:TextViewCutoutPosition, size:NSSize) {
-        self.position = position
-        self.size = size
+    public var topLeft: CGSize?
+    public var topRight: CGSize?
+    public var bottomRight: CGSize?
+    
+    public init(topLeft: CGSize? = nil, topRight: CGSize? = nil, bottomRight: CGSize? = nil) {
+        self.topLeft = topLeft
+        self.topRight = topRight
+        self.bottomRight = bottomRight
     }
-}
-
-public func ==(lhs: TextViewCutout, rhs: TextViewCutout) -> Bool {
-    return lhs.position == rhs.position && lhs.size == rhs.size
 }
 
 private let defaultFont:NSFont = .normal(.text)
@@ -268,7 +268,7 @@ public final class TextViewLayout : Equatable {
     public var insets:NSSize = NSZeroSize
     public fileprivate(set) var lines:[TextViewLine] = []
     public fileprivate(set) var isPerfectSized:Bool = true
-    public let maximumNumberOfLines:Int32
+    public var maximumNumberOfLines:Int32
     public let truncationType:CTLineTruncationType
     public var cutout:TextViewCutout?
     public var mayBlocked: Bool = true
@@ -306,6 +306,10 @@ public final class TextViewLayout : Equatable {
             penFlush = 0.0
         }
         self.lineSpacing = lineSpacing
+    }
+    
+    public func dropLayoutSize() {
+        self.layoutSize = .zero
     }
     
     func calculateLayout(isBigEmoji: Bool = false) -> Void {
@@ -348,15 +352,31 @@ public final class TextViewLayout : Equatable {
         var cutoutMaxY: CGFloat = 0.0
         var cutoutWidth: CGFloat = 0.0
         var cutoutOffset: CGFloat = 0.0
-        if let cutout = cutout {
+        
+        
+        var bottomCutoutEnabled = false
+        var bottomCutoutSize = CGSize()
+        
+
+        
+        
+        if let topLeft = cutout?.topLeft {
             cutoutMinY = -fontLineSpacing
-            cutoutMaxY = cutout.size.height + fontLineSpacing
-            cutoutWidth = cutout.size.width
-            if case .TopLeft = cutout.position {
-                cutoutOffset = cutoutWidth
-            }
+            cutoutMaxY = topLeft.height + fontLineSpacing
+            cutoutWidth = topLeft.width
+            cutoutOffset = cutoutWidth
+            cutoutEnabled = true
+        } else if let topRight = cutout?.topRight {
+            cutoutMinY = -fontLineSpacing
+            cutoutMaxY = topRight.height + fontLineSpacing
+            cutoutWidth = topRight.width
             cutoutEnabled = true
         }
+        if let bottomRight = cutout?.bottomRight {
+            bottomCutoutSize = bottomRight
+            bottomCutoutEnabled = true
+        }
+
         
         var first = true
         var breakInset: CGFloat = 0
@@ -448,6 +468,8 @@ public final class TextViewLayout : Equatable {
                 
                 let originalLine = CTTypesetterCreateLineWithOffset(typesetter, CFRange(location: lastLineCharacterIndex, length: attributedString.length - lastLineCharacterIndex), 0.0)
                 
+               
+                
                 if CTLineGetTypographicBounds(originalLine, nil, nil, nil) - CTLineGetTrailingWhitespaceWidth(originalLine) < Double(constrainedWidth) {
                     coreTextLine = originalLine
                 } else {
@@ -458,7 +480,14 @@ public final class TextViewLayout : Equatable {
                     let truncatedTokenString = NSAttributedString(string: tokenString, attributes: truncationTokenAttributes)
                     let truncationToken = CTLineCreateWithAttributedString(truncatedTokenString)
                     
-                    coreTextLine = CTLineCreateTruncatedLine(originalLine, Double(constrainedWidth), truncationType, truncationToken) ?? truncationToken
+                    
+                    var lineConstrainedWidth = constrainedWidth
+                    if bottomCutoutEnabled {
+                        lineConstrainedWidth -= bottomCutoutSize.width
+                    }
+
+                    
+                    coreTextLine = CTLineCreateTruncatedLine(originalLine, Double(lineConstrainedWidth), truncationType, truncationToken) ?? truncationToken
                     isPerfectSized = false
                 }
                 
@@ -654,7 +683,7 @@ public final class TextViewLayout : Equatable {
         
         attributedString.enumerateAttribute(NSAttributedString.Key.link, in: attributedString.range, options: NSAttributedString.EnumerationOptions(rawValue: 0), using: { value, range, stop in
             if let value = value {
-                if interactions.isDomainLink(value) && strokeLinks {
+                if interactions.isDomainLink(value, attributedString.attributedSubstring(from: range).string) && strokeLinks {
                     for line in lines {
                         let lineRange = NSIntersectionRange(range, line.range)
                         if lineRange.length != 0 {
@@ -667,7 +696,6 @@ public final class TextViewLayout : Equatable {
                             let color: NSColor = attributedString.attribute(NSAttributedString.Key.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor ?? presentation.colors.link
                             let rect = NSMakeRect(line.frame.minX + leftOffset, line.frame.minY + 1, rightOffset - leftOffset, 1.0)
                             strokeRects.append((rect, color))
-                            
                             if !disableTooltips, interactions.resolveLink(value) != attributedString.string.nsstring.substring(with: range) {
                                 var leftOffset: CGFloat = 0.0
                                 if lineRange.location != line.range.location {
@@ -962,13 +990,16 @@ public final class TextViewLayout : Equatable {
             self.selectedRange = TextSelectedRange(color: selectText)
             return
         }
-        let valid:Bool = char.trimmingCharacters(in: NSCharacterSet.alphanumerics) == "" || char == "_"
+        let tidyChar = char.trimmingCharacters(in: NSCharacterSet.alphanumerics)
+        let valid:Bool = tidyChar == "" || tidyChar == "_" || tidyChar == "\u{FFFD}"
         let string:NSString = attributedString.string.nsstring
         while valid {
             let prevChar = string.substring(with: NSMakeRange(prev, 1))
             let nextChar = string.substring(with: NSMakeRange(next, 1))
-            var prevValid:Bool = prevChar.trimmingCharacters(in: NSCharacterSet.alphanumerics) == "" || prevChar == "_"
-            var nextValid:Bool = nextChar.trimmingCharacters(in: NSCharacterSet.alphanumerics) == "" || nextChar == "_"
+            let tidyPrev = prevChar.trimmingCharacters(in: NSCharacterSet.alphanumerics)
+            let tidyNext = nextChar.trimmingCharacters(in: NSCharacterSet.alphanumerics)
+            var prevValid:Bool = tidyPrev == "" || tidyPrev == "_" || tidyPrev == "\u{FFFD}"
+            var nextValid:Bool = tidyNext == "" || tidyNext == "_" || tidyNext == "\u{FFFD}"
             if (prevValid && prev > 0) {
                 prev -= 1
             }
@@ -983,7 +1014,8 @@ public final class TextViewLayout : Equatable {
             if(next == string.length - 1) {
                 nextValid = false
                 let nextChar = string.substring(with: NSMakeRange(next, 1))
-                if nextChar.trimmingCharacters(in: NSCharacterSet.alphanumerics) == "" || nextChar == "_" {
+                let nextTidy = nextChar.trimmingCharacters(in: NSCharacterSet.alphanumerics)
+                if nextTidy == "" || nextTidy == "_" || nextTidy == "\u{FFFD}" {
                     range.length += 1
                 }
             }
@@ -995,7 +1027,7 @@ public final class TextViewLayout : Equatable {
             }
         }
         
-        self.selectedRange = TextSelectedRange(range: range, color: selectText, def: true)
+        self.selectedRange = TextSelectedRange(range: NSMakeRange(max(range.location, 0), min(max(range.length, 0), string.length)), color: selectText, def: true)
     }
     
 
@@ -1309,6 +1341,7 @@ public class TextView: Control, NSViewToolTipOwner {
                         guard let `self` = self else {return}
                         if let resolved = resolved {
                             let pb = NSPasteboard.general
+                            pb.clearContents()
                             pb.declareTypes([.string], owner: self)
                             pb.setString(resolved, forType: .string)
                         } else {
@@ -1648,6 +1681,7 @@ public class TextView: Control, NSViewToolTipOwner {
                 if !copy() && layout.selectedRange.range.location != NSNotFound {
                     if !layout.interactions.copyAttributedString(layout.attributedString.attributedSubstring(from: layout.selectedRange.range)) {
                         let pb = NSPasteboard.general
+                        pb.clearContents()
                         pb.declareTypes([.string], owner: self)
                         pb.setString(layout.attributedString.string.nsstring.substring(with: layout.selectedRange.range), forType: .string)
                     }
@@ -1655,6 +1689,7 @@ public class TextView: Control, NSViewToolTipOwner {
             } else if layout.selectedRange.range.location != NSNotFound {
                 if !layout.interactions.copyAttributedString(layout.attributedString.attributedSubstring(from: layout.selectedRange.range)) {
                     let pb = NSPasteboard.general
+                    pb.clearContents()
                     pb.declareTypes([.string], owner: self)
                     pb.setString(layout.attributedString.string.nsstring.substring(with: layout.selectedRange.range), forType: .string)
                 }

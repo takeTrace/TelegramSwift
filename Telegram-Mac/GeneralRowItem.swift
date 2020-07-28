@@ -190,6 +190,15 @@ enum GeneralViewType : Equatable {
         }
     }
     
+    func withUpdatedInsets(_ insets: NSEdgeInsets) -> GeneralViewType {
+        switch self {
+        case .legacy:
+            return self
+        case let .modern(position, _):
+            return .modern(position: position, insets: insets)
+        }
+    }
+    
     static var firstItem: GeneralViewType {
         return .modern(position: .first, insets: NSEdgeInsetsMake(12, 16, 12, 16))
     }
@@ -274,7 +283,12 @@ class GeneralRowItem: TableRowItem {
         if let backgroundColor = backgroundColor {
             self.backgroundColor = backgroundColor
         } else {
-            self.backgroundColor = viewType.rowBackground
+            switch viewType {
+            case .modern:
+                self.backgroundColor = theme.colors.listBackground
+            default:
+                self.backgroundColor = viewType.rowBackground
+            }
         }
         
         self.drawCustomSeparator = drawCustomSeparator
@@ -306,6 +320,7 @@ class GeneralRowItem: TableRowItem {
     override var canBeAnchor: Bool {
         return false
     }
+    
     
     var blockWidth: CGFloat {
         switch self.viewType {

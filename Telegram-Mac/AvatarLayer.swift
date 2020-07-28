@@ -211,7 +211,7 @@ class AvatarControl: NSView {
                         photo = nil
                         self.setState(account: account, state: .Empty)
                         let icon = theme.icons.deletedAccount
-                        self.setSignal(generateEmptyPhoto(frame.size, type: .icon(colors: theme.colors.peerColors(Int(peer.id.id % 7)), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(frame.size.width - 20, frame.size.height - 20)), cornerRadius: nil)) |> map {($0, false)})
+                        self.setSignal(generateEmptyPhoto(frame.size, type: .icon(colors: theme.colors.peerColors(Int(peer.id.id % 7)), icon: icon, iconSize: icon.backingSize.aspectFitted(NSMakeSize(min(50, frame.size.width - 20), min(frame.size.height - 20, 50))), cornerRadius: nil)) |> map {($0, false)})
                         return
                     } else {
                         photo = .peer(peer, representation, letters, message)
@@ -222,7 +222,7 @@ class AvatarControl: NSView {
                     photo = nil
                 }
                 if let photo = photo {
-                    setSignal(peerAvatarImage(account: account, photo: photo, displayDimensions: frame.size, scale:backingScaleFactor, font: self.font, synchronousLoad: attemptLoadNextSynchronous))
+                    setSignal(peerAvatarImage(account: account, photo: photo, displayDimensions: frame.size, scale:backingScaleFactor, font: self.font, synchronousLoad: attemptLoadNextSynchronous), force: false)
                 } else {
                     let content = self.layer?.contents
                     self.displaySuspended = false
@@ -235,7 +235,10 @@ class AvatarControl: NSView {
         }
     }
     
-    public func setSignal(_ signal: Signal<(CGImage?, Bool), NoError>) {
+    public func setSignal(_ signal: Signal<(CGImage?, Bool), NoError>, force: Bool = true) {
+        if force {
+            self.state = .Empty
+        }
         self.disposable.set((signal |> deliverOnMainQueue).start(next: { [weak self] image, animated in
             if let strongSelf = self {
                 strongSelf.layer?.contents = image

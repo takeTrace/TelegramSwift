@@ -190,6 +190,10 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     
 }
     
+    
+-(void)setSelectedRange:(NSRange)selectedRange {
+    [super setSelectedRange:selectedRange];
+}
 -(void)rightMouseDown:(NSEvent *)event {
     [self.window makeFirstResponder:self];
     [super rightMouseDown:event];
@@ -218,6 +222,9 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     
     NSMutableArray *removeItems = [[NSMutableArray alloc] init];
     
+    __block BOOL addedTransformations = false;
+
+    
     [menu.itemArray enumerateObjectsUsingBlock:^(NSMenuItem * _Nonnull item, NSUInteger idx, BOOL * _Nonnull s) {
         
         if (item.action == @selector(submenuAction:)) {
@@ -226,6 +233,7 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
                     [removeItems addObject:item];
                     *stop = YES;
                 } else if (subItem.action == @selector(capitalizeWord:)) {
+                    addedTransformations = true;
                     if ([_weakd respondsToSelector:@selector(canTransformInputText)]) {
                         if (self.selectedRange.length > 0) {
                             if ([_weakd canTransformInputText]) {
@@ -243,6 +251,26 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
             }];
         }
     }];
+    
+    if (!addedTransformations) {
+        if ([_weakd respondsToSelector:@selector(canTransformInputText)]) {
+            if (self.selectedRange.length > 0) {
+                if ([_weakd canTransformInputText]) {
+                    NSMenuItem *sep = [NSMenuItem separatorItem];
+                    [menu addItem: sep];
+                    
+                    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:NSLocalized(@"Text.View.Transformations", nil) action:nil keyEquivalent:@""];
+                    
+                    item.submenu = [[NSMenu alloc] init];
+                    
+                    [self.transformItems enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+                        [item.submenu insertItem:obj atIndex:0];
+                    }];
+                    [menu addItem:item];
+                }
+            }
+        }
+    }
     
     [removeItems enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
         [menu removeItem:obj];
@@ -597,11 +625,14 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
             
             BOOL result = [_weakd textViewEnterPressed:theEvent];
             
-            if (!result && (theEvent.modifierFlags & NSEventModifierFlagCommand)) {
+            if ((!result && (theEvent.modifierFlags & NSEventModifierFlagCommand)) || (!result && (theEvent.modifierFlags & NSEventModifierFlagShift))) {
                 [super insertNewline:self];
                 return;
             }
             
+            if (result) {
+                return;
+            }
         } else if(theEvent.keyCode == 53 && [_weakd respondsToSelector:@selector(textViewNeedClose:)]) {
             [_weakd textViewNeedClose:self];
             return;
@@ -722,8 +753,8 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
         [_placeholder setDrawsBackground:NO];
         [_placeholder setSelectable:NO];
         [_placeholder setEditable:NO];
-        [[_placeholder cell] setLineBreakMode:NSLineBreakByTruncatingTail];
         [_placeholder setEnabled:NO];
+        [_placeholder setLineBreakMode:NSLineBreakByTruncatingTail];
         
         [self addSubview:_placeholder];
         
@@ -819,43 +850,7 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     [super drawRect:dirtyRect];
     
 }
-    
--(BOOL)textView:(NSTextView *)textView doCommandBySelector:(SEL)commandSelector {
-    if ((commandSelector == @selector(deleteBackward:) || commandSelector == @selector(deleteForward:)) && _defaultText.length > 0) {
-        if ([textView.string isEqualToString:_defaultText]) {
-            return true;
-        }
-    } else if (commandSelector == @selector(insertNewline:)) {
-        NSString *sendingType = [[NSUserDefaults standardUserDefaults] stringForKey:@"kSendingType"];
-        if (isEnterEvent([NSApp currentEvent]) && isEnterAccessObjc([NSApp currentEvent], [sendingType isEqualToString:@"cmdEnter"])) {
-            return true;
-        }
-    }
-    return false;
-}
-    
--(BOOL)textView:(NSTextView *)textView shouldChangeTextInRanges:(NSArray<NSValue *> *)affectedRanges replacementStrings:(NSArray<NSString *> *)replacementStrings {
-    if (_defaultText.length > 0) {
-        __block BOOL cancel = true;
-        [affectedRanges enumerateObjectsUsingBlock:^(NSValue * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-            NSRange range = obj.rangeValue;
-            if (range.location < _defaultText.length) {
-                cancel = false;
-                *stop = YES;
-            }
-            if (self.isWhitespaceDisabled && range.length == 0 && [replacementStrings[idx] isEqualToString:@" "]) {
-                cancel = false;
-                *stop = YES;
-            }
-        }];
-        if (cancel) {
-            [self setSelectedRange:NSMakeRange(textView.string.length, 0)];
-        }
-        
-        return cancel;
-    }
-    return true;
-}
+
     
     
 -(NSArray<NSTouchBarItemIdentifier> *)textView:(NSTextView *)textView shouldUpdateTouchBarItemIdentifiers:(NSArray<NSTouchBarItemIdentifier> *)identifiers {
@@ -868,15 +863,15 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
 - (void)textDidChange:(NSNotification *)notification {
     int limit = self.delegate == nil ? INT32_MAX : [self.delegate maxCharactersLimit: self];
     
-    if (self.string != nil && self.string.length > 0 && self.string.length - _defaultText.length > limit) {
+    if (self.string != nil && self.string.length > 0 && self.string.length > limit) {
         
-        NSAttributedString *string = [self.attributedString attributedSubstringFromRange:NSMakeRange(0, MIN(limit + _defaultText.length, self.attributedString.string.length))];
+        NSAttributedString *string = [self.attributedString attributedSubstringFromRange:NSMakeRange(0, MIN(limit, self.attributedString.string.length))];
         
         NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithAttributedString: string];
         NSRange selectedRange = _textView.selectedRange;
         [_textView.textStorage setAttributedString:attr];
-        [self setSelectedRange:NSMakeRange(MIN(selectedRange.location, string.length), 0)];
         [self update:notification != nil];
+        [self setSelectedRange:NSMakeRange(MIN(selectedRange.location, string.length), 0)];
         if ([self.delegate respondsToSelector:@selector(textViewDidReachedLimit:)])
         [self.delegate textViewDidReachedLimit: self];
         return;
@@ -899,14 +894,6 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     
     if(notification.object) {
         NSString *text = self.string;
-        if (_defaultText.length > 0) {
-            NSRange range = [text rangeOfString:_defaultText];
-            if (range.location != NSNotFound) {
-                text = [text substringFromIndex:range.location + range.length];
-            } else if ([_defaultText containsString:text]) {
-                text = @"";
-            }
-        }
         [self.delegate textViewTextDidChange:text];
         if (![text isEqualToString:self.string]) {
             return;
@@ -1172,7 +1159,7 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     
     
     [_placeholder sizeToFit];
-    [_placeholder setFrameSize:NSMakeSize(MIN(NSWidth(_textView.frame) - self._startXPlaceholder - 10,NSWidth(_placeholder.frame)), NSHeight(_placeholder.frame))];
+   // [_placeholder setFrameSize:NSMakeSize(MIN(NSWidth(_textView.frame) - self._startXPlaceholder - 10,NSWidth(_placeholder.frame)), NSHeight(_placeholder.frame))];
     [_placeholder setFrameOrigin:self._needShowPlaceholder ? NSMakePoint(self._startXPlaceholder, fabsf(roundf((newSize.height - NSHeight(_placeholder.frame))/2.0))) : NSMakePoint(NSMinX(_placeholder.frame) + 30, fabsf(roundf((newSize.height - NSHeight(_placeholder.frame))/2.0)))];
 }
     
@@ -1192,8 +1179,7 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     [_placeholder setAttributedStringValue:placeholderAttributedString];
     
     [_placeholder sizeToFit];
-    
-    [_placeholder setFrameSize:NSMakeSize(MIN(NSWidth(_textView.frame) - self._startXPlaceholder - 10,NSWidth(_placeholder.frame)), NSHeight(_placeholder.frame))];
+   // [_placeholder setFrameSize:NSMakeSize(MIN(NSWidth(_textView.frame) - self._startXPlaceholder - 10,NSWidth(_placeholder.frame)), NSHeight(_placeholder.frame))];
     [_placeholder setFrameOrigin:self._needShowPlaceholder ? NSMakePoint(self._startXPlaceholder, fabsf(roundf((self.frame.size.height - NSHeight(_placeholder.frame))/2.0))) : NSMakePoint(NSMinX(_placeholder.frame) + 30, fabsf(roundf((self.frame.size.height - NSHeight(_placeholder.frame))/2.0)))];
     BOOL animates = _animates;
     _animates = NO;
@@ -1424,22 +1410,24 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
     }];
     
     
+    NSRange selectedRange = _textView.selectedRange;
+    if (selectedRange.location == self.textView.string.length) {
+        selectedRange = NSMakeRange(attr.length, 0);
+    }
     [_textView.textStorage setAttributedString:attr];
     BOOL o = self.animates;
     self.animates = animated;
     [self update:animated];
     self.animates = o;
+   
+    [self setSelectedRange:NSMakeRange(MIN(selectedRange.location, string.length), 0)];
+
 }
     
--(NSString *)textWithDefault:(NSString *)string {
-    NSString *text = _defaultText.length > 0 ? [_defaultText stringByAppendingString:string] : string;
-    
-    return text;
-}
     
 -(void)setString:(NSString *)string {
     
-    if (![string isEqualToString:[self textWithDefault:self.string]]) {
+    if (![string isEqualToString:self.string]) {
         [self setString:string animated:self.animates];
     }
 }
@@ -1447,7 +1435,7 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
 -(void)setString:(NSString *)string animated:(BOOL)animated {
     BOOL o = self.animates;
     self.animates = animated;
-    [_textView setString:[self textWithDefault:string]];
+    [_textView setString:string];
     [self update:animated];
     self.animates = o;
 }
@@ -1611,6 +1599,7 @@ NSString *const TGCustomLinkAttributeName = @"TGCustomLinkAttributeName";
 -(void)setBackgroundColor:(NSColor * __nonnull)color {
     self.scrollView.backgroundColor = color;
     self.textView.backgroundColor = color;
+    _placeholder.backgroundColor = [NSColor redColor];
 }
 
 @end

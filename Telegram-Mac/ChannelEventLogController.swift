@@ -293,9 +293,11 @@ private func eventLogItems(_ result:AdminLogEventsResult, initialSize: NSSize, c
     for event in result.events {
         switch event.action {
         case let .editMessage(prev, new):
-            let item = ChatRowItem.item(initialSize, from: .MessageEntry(new.withUpdatedStableId(arc4random()), MessageIndex(new), true, .list, .Full(rank: nil), nil, ChatHistoryEntryData(nil, MessageEntryAdditionalData(), AutoplayMediaPreferences.defaultSettings)), interaction: chatInteraction, theme: theme)
-            items.append(ChannelEventLogEditedPanelItem(initialSize, previous: prev, item: item))
-            items.append(item)
+            let item = ChatRowItem.item(initialSize, from: .MessageEntry(new.withUpdatedStableId(arc4random()), MessageIndex(new), true, .list, .Full(rank: nil), nil, ChatHistoryEntryData(nil, MessageEntryAdditionalData(), AutoplayMediaPreferences.defaultSettings)), interaction: chatInteraction, theme: theme) as? ChatRowItem
+            if let item = item {
+                items.append(ChannelEventLogEditedPanelItem(initialSize, previous: prev, item: item))
+                items.append(item)
+            }
         case let .deleteMessage(message):
             items.append(ChatRowItem.item(initialSize, from: .MessageEntry(message.withUpdatedStableId(arc4random()), MessageIndex(message), true, .list, .Full(rank: nil), nil, ChatHistoryEntryData(nil, MessageEntryAdditionalData(), AutoplayMediaPreferences.defaultSettings)), interaction: chatInteraction, theme: theme))
         case let .updatePinned(message):
@@ -509,18 +511,22 @@ class ChannelEventLogController: TelegramGenericViewController<ChannelEventLogVi
                 }
             }))
         
-        genericView.tableView.setScrollHandler { [weak self] scroll in
-            if let strongSelf = self {
-                switch scroll.direction {
-                case .bottom:
-                    strongSelf.history.set(strongSelf.history.get() |> take(1) |> map { (_, state) in
-                        return (currentMaxId.modify({$0}), state)
-                        })
-                default:
-                    break
-                }
-            }
-        }
+//        genericView.tableView.setScrollHandler { [weak self] scroll in
+//            if let strongSelf = self {
+//                switch scroll.direction {
+//                case .bottom:
+//                    let signal = strongSelf.history.get() |> take(1) |> map { (_, state) in
+//                        (currentMaxId.with { $0 }, state)
+//                    }
+//                    _ = signal.start(next: { [weak strongSelf] data in
+//                        strongSelf?.history.set(.sing)
+//                    })
+//
+//                default:
+//                    break
+//                }
+//            }
+//        }
         
         readyOnce()
         history.set(.single((0, ChannelEventFilterState())))

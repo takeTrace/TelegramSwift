@@ -173,7 +173,7 @@ fileprivate class PreviewSenderView : Control {
         }, for: .Click)
         
         closeButton.set(handler: { [weak self] _ in
-            self?.controller?.close()
+            self?.controller?.closeModal()
         }, for: .Click)
         
         fileButton.set(image: ControlStyle(highlightColor: theme.colors.grayIcon).highlight(image: theme.icons.previewSenderFile), for: .Normal)
@@ -633,7 +633,7 @@ private final class PreviewMedia : Comparable, Identifiable {
         return PreviewMedia(container: container, index: index, media: media)
     }
     
-    func generateMedia(account: Account) -> Media {
+    func generateMedia(account: Account, isSecretRelated: Bool) -> Media {
         
         if let media = self.media {
             return media
@@ -648,7 +648,7 @@ private final class PreviewMedia : Comparable, Identifiable {
             }
         }
         
-        _ = Sender.generateMedia(for: container, account: account).start(next: { media, path in
+        _ = Sender.generateMedia(for: container, account: account, isSecretRelated: isSecretRelated).start(next: { media, path in
             generated = media
             semaphore.signal()
         })
@@ -673,9 +673,9 @@ private func previewMedias(containers:[MediaSenderContainer], savedState: [Previ
 }
 
 
-private func prepareMedias(left: [PreviewMedia], right: [PreviewMedia], account: Account) -> UpdateTransition<Media> {
+private func prepareMedias(left: [PreviewMedia], right: [PreviewMedia], isSecretRelated: Bool, account: Account) -> UpdateTransition<Media> {
     let (removed, inserted, updated) = proccessEntriesWithoutReverse(left, right: right, { item in
-        return item.generateMedia(account: account)
+        return item.generateMedia(account: account, isSecretRelated: isSecretRelated)
     })
     return UpdateTransition(deleted: removed, inserted: inserted, updated: updated)
 }
@@ -809,6 +809,23 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
         return .invokeNext
     }
     
+    override func close(animationType: ModalAnimationCloseBehaviour = .common) {
+        
+        let currentText = self.genericView.textView.string()
+        let basicText = self.temporaryInputState?.inputText ?? ""
+        if (self.temporaryInputState == nil && !currentText.isEmpty) || (basicText != currentText) {
+            confirm(for: context.window, header: L10n.mediaSenderDiscardChangesHeader, information: L10n.mediaSenderDiscardChangesText, okTitle: L10n.mediaSenderDiscardChangesOK, successHandler: { [weak self] _ in
+                self?.closeModal()
+            })
+        } else {
+            self.closeModal()
+        }
+    }
+    
+    fileprivate func closeModal() {
+        super.close()
+    }
+    
     func send(_ silent: Bool, atDate: Date? = nil) {
         
         let text = self.genericView.textView.string().trimmed
@@ -912,6 +929,8 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
         })
         
         let archiveRandomId = arc4random()
+        
+        let isSecretRelated = chatInteraction.peerId.namespace == Namespaces.Peer.SecretChat
        
         
         let previousMedias:Atomic<[PreviewMedia]> = Atomic(value: [])
@@ -943,7 +962,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
             
             return (previewMedias(containers: containers, savedState: savedStateMedias.with { $0[state]}), urls, state)
         } |> map { previews, urls, state in
-            return (prepareMedias(left: previousMedias.swap(previews), right: previews, account: context.account), urls, state, previews)
+            return (prepareMedias(left: previousMedias.swap(previews), right: previews, isSecretRelated: isSecretRelated, account: context.account), urls, state, previews)
         }
 
         actionsDisposable.add(urlsTransition.start(next: { transition, urls, state, previews in
@@ -1003,7 +1022,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
             self.genericView.textView.setPlaceholderAttributedString(.initialize(string: self.inputPlaceholder, color: theme.colors.grayText, font: .normal(.text)), update: false)
 
             if self.genericView.tableView.isEmpty {
-                self.close()
+                self.closeModal()
                 if self.chatInteraction.presentation.effectiveInput.inputText.isEmpty {
                     let attributedString = self.genericView.textView.attributedString()
                     let input = ChatTextInputState(inputText: attributedString.string, selectionRange: attributedString.string.length ..< attributedString.string.length, attributes: chatTextAttributes(from: attributedString))
@@ -1048,6 +1067,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
         
         self.genericView.stateValueInteractiveUpdate = { [weak self] state in
             guard let `self` = self else { return }
+            self.genericView.tableView.scroll(to: .up(true))
             self.urlsAndStateValue.set(UrlAndState(self.urls, state))
         }
         
@@ -1086,7 +1106,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
                 
                 self.sent = true
                 self.emoji.popover?.hide()
-                self.modal?.close(true)
+                self.closeModal()
                 
                 var input:ChatTextInputState = ChatTextInputState(inputText: attributed.string, selectionRange: 0 ..< 0, attributes: chatTextAttributes(from: attributed)).subInputState(from: NSMakeRange(0, attributed.length))
                 
@@ -1129,6 +1149,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
                         return data
                     }}
                     self.urls[index] = new
+                    addAppLogEvent(postbox: context.account.postbox, time: Date().timeIntervalSince1970, type: AppLogEvents.imageEditor.rawValue, peerId: context.peerId, data: [:])
                 }
             }))
         }
@@ -1297,7 +1318,7 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
         let context = chatInteraction.context
         self.asMedia = asMedia
         self.context = context
-        self.emoji = EmojiViewController(context, search: .single(SearchState(state: .None, request: nil)))
+        self.emoji = EmojiViewController(context)
         
        
 
@@ -1505,6 +1526,9 @@ class PreviewSenderController: ModalViewController, TGModernGrowingDelegate, Not
         
         let defaultUrl = defaultTag?.attachment as? String
         
+        if defaultUrl == nil {
+            effectiveRange = range
+        }
         if effectiveRange.location == NSNotFound {
             effectiveRange = range
         }

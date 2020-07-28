@@ -512,10 +512,6 @@ public extension NSView {
             x = CGFloat(roundf(Float((sv.frame.width - frame.width)/2.0)))
         }
         
-        if x == 128.0 {
-            var bp:Int = 0
-            bp += 1
-        }
         
         self.setFrameOrigin(NSMakePoint(x + addition, y == nil ? NSMinY(self.frame) : y!))
     }
@@ -683,6 +679,9 @@ public extension NSView {
             if let sub = sub as? View, let resporeState = sub.interactionStateForRestore {
                 sub.userInteractionEnabled = resporeState
                 sub.interactionStateForRestore = nil
+            } else if let sub = sub as? TableRowView, let resporeState = sub.interactionStateForRestore {
+                sub.userInteractionEnabled = resporeState
+                sub.interactionStateForRestore = nil
             }
             sub.restoreHierarchyInteraction()
         }
@@ -693,6 +692,9 @@ public extension NSView {
             if let sub = sub as? View, let resporeState = sub.dynamicContentStateForRestore {
                 sub.isDynamicContentLocked = resporeState
                 sub.dynamicContentStateForRestore = nil
+            } else if let sub = sub as? TableRowView, let resporeState = sub.dynamicContentStateForRestore {
+                sub.isDynamicContentLocked = resporeState
+                sub.dynamicContentStateForRestore = nil
             }
             sub.restoreHierarchyDynamicContent()
         }
@@ -701,6 +703,9 @@ public extension NSView {
     func disableHierarchyDynamicContent() -> Void {
         for sub in self.subviews {
             if let sub = sub as? View, sub.interactionStateForRestore == nil {
+                sub.dynamicContentStateForRestore = sub.isDynamicContentLocked
+                sub.isDynamicContentLocked = true
+            } else if let sub = sub as? TableRowView, sub.interactionStateForRestore == nil {
                 sub.dynamicContentStateForRestore = sub.isDynamicContentLocked
                 sub.isDynamicContentLocked = true
             }
@@ -784,12 +789,12 @@ public extension CGSize {
     }
     
     func multipliedByScreenScale() -> CGSize {
-        let scale:CGFloat = 2.0
+        let scale:CGFloat = System.backingScale
         return CGSize(width: self.width * scale, height: self.height * scale)
     }
     
     func dividedByScreenScale() -> CGSize {
-        let scale:CGFloat = 2.0
+        let scale:CGFloat = System.backingScale
         return CGSize(width: self.width / scale, height: self.height / scale)
     }
 }
@@ -919,6 +924,10 @@ public extension CGImage {
     
     var size:NSSize {
         return NSMakeSize(CGFloat(width), CGFloat(height))
+    }
+    
+    var systemSize:NSSize {
+        return NSMakeSize(CGFloat(width) / System.backingScale, CGFloat(height) / System.backingScale)
     }
     
     var backingBounds: NSRect {
@@ -1352,6 +1361,8 @@ public extension NSColor {
         var g: CGFloat = 0
         var b: CGFloat = 0
         var a: CGFloat = 0
+        
+        
         
         let color = self.usingColorSpaceName(NSColorSpaceName.deviceRGB)!
 

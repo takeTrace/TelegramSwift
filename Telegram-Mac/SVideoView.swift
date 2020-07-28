@@ -252,6 +252,10 @@ private final class SVideoControlsView : Control {
     private let durationView: TextView = TextView()
     private let currentTimeView: TextView = TextView()
     
+    private var controlMovePosition: NSPoint? = nil
+    
+    
+    
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         addSubview(backgroundView)
@@ -343,10 +347,54 @@ private final class SVideoControlsView : Control {
                 self.updateLivePreview()
             }
         }
+        
+        set(handler: { [weak self] control in
+            guard let window = control.window, let superview = control.superview else {
+                return
+            }
+            self?.controlMovePosition = superview.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        }, for: .Down)
+        
+       
+        
+        set(handler: { [weak self] control in
+            guard let window = control.window, let superview = control.superview, let start = self?.controlMovePosition else {
+                return
+            }
+            var mouse = superview.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            
+            var dif = NSMakePoint(mouse.x - start.x, mouse.y - start.y)
+            var point = NSMakePoint(control.frame.minX + dif.x, control.frame.minY + dif.y)
+            
+            if point.x < 2 || point.x > superview.frame.width - control.frame.width - 4  {
+                mouse.x = start.x
+            }
+            if point.y < 2 || point.y > superview.frame.height - control.frame.height - 4  {
+                mouse.y = start.y
+            }
+            self?.controlMovePosition = mouse
+
+            dif = NSMakePoint(mouse.x - start.x, mouse.y - start.y)
+            point = NSMakePoint(control.frame.minX + dif.x, control.frame.minY + dif.y)
+            control.setFrameOrigin(point)
+            
+
+        }, for: .MouseDragging)
     }
     
     override var isFlipped: Bool {
         return true
+    }
+    
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if let window = newWindow as? Window {
+            window.set(mouseHandler: { [weak self] event -> KeyHandlerResult in
+                self?.controlMovePosition = nil
+                return .rejected
+            }, with: self, for: .leftMouseUp)
+        } else {
+            (window as? Window)?.remove(object: self, for: .leftMouseUp)
+        }
     }
     
     override func setFrameSize(_ newSize: NSSize) {
@@ -448,17 +496,20 @@ class SVideoView: NSView {
     
     var status: MediaPlayerStatus? = nil {
         didSet {
-            controls.status = status
-            if let status = status {
-                switch status.status {
-                case .buffering:
-                    bufferingIndicatorValue.set(.single(!isStreamable) |> delay(0.2, queue: Queue.mainQueue()))
-                default:
-                    bufferingIndicatorValue.set(.single(true))
+            if status != oldValue {
+                controls.status = status
+                if let status = status {
+                    switch status.status {
+                    case .buffering:
+                        bufferingIndicatorValue.set(.single(!isStreamable) |> delay(0.2, queue: Queue.mainQueue()))
+                    default:
+                        bufferingIndicatorValue.set(.single(true))
+                    }
+                } else {
+                    bufferingIndicatorValue.set(.single(!isStreamable))
                 }
-            } else {
-                bufferingIndicatorValue.set(.single(!isStreamable))
             }
+            
         }
     }
     var bufferingStatus: (IndexSet, Int)? {
@@ -483,13 +534,23 @@ class SVideoView: NSView {
     private let backgroundView: NSView = NSView()
     override func layout() {
         super.layout()
+        let oldSize = mediaPlayer.frame.size
         mediaPlayer.frame = bounds
         mediaPlayer.updateLayout()
         self.controlsStyle = self.controlsStyle.withUpdatedStyle(compact: frame.width < 300).withUpdatedHideRewind(hideRewind: frame.width < 400)
         controls.setFrameSize(self.controlsStyle.isCompact ? 220 : min(frame.width - 10, 510), 94)
         let bufferingStatus = self.bufferingStatus
         self.bufferingStatus = bufferingStatus
-        controls.centerX(y: frame.height - controls.frame.height - 24)
+        if controls.frame.origin == .zero {
+            controls.centerX(y: frame.height - controls.frame.height - 24)
+        } else if oldSize != frame.size {
+            let dif = oldSize - frame.size
+            var point = NSMakePoint(controls.frame.minX - dif.width / 2, controls.frame.minY - dif.height / 2)
+            point.x = min(max(2, point.x), frame.width - controls.frame.width - 4)
+            point.y = min(max(2, point.y), frame.height - controls.frame.height - 4)
+
+            controls.setFrameOrigin(point)
+        }
         bufferingIndicator.center()
         bufferingIndicator.progressColor = .white
         backgroundView.frame = bounds
@@ -595,8 +656,9 @@ class SVideoView: NSView {
         controls.progress.onUserChanged = { [weak self] value in
             guard let `self` = self else {return}
             if let status = self.status {
-                self.status = status.withUpdatedTimestamp(status.duration * Double(value))
-                self.interactions?.rewind(status.duration * Double(value))
+                let result = min(status.duration * Double(value), status.duration)
+                self.status = status.withUpdatedTimestamp(result)
+                self.interactions?.rewind(result)
             }
         }
         
@@ -663,7 +725,7 @@ class SVideoView: NSView {
             previewView?.background = .black
             addSubview(previewView!)
         }
-        previewView?.setFrameSize(initialedSize.aspectFitted(NSMakeSize(200, 200)))
+        previewView?.setFrameSize(initialedSize.aspectFitted(NSMakeSize(150, 150)))
     }
     
     private var currentPreviewState: MediaPlayerFramePreviewResult?

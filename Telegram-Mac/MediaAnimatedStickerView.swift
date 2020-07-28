@@ -33,8 +33,8 @@ class MediaAnimatedStickerView: ChatMediaContentView {
     }
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        addSubview(self.playerView)
         addSubview(self.thumbView)
+        addSubview(self.playerView)
 
     }
     
@@ -77,7 +77,7 @@ class MediaAnimatedStickerView: ChatMediaContentView {
         
         var signal = Signal<Void, NoError>.single(Void())
         if accept && !nextForceAccept {
-            signal = signal |> delay(accept ? 0.25 : 0, queue: .mainQueue())
+            signal = signal |> delay(accept ? 0.1 : 0, queue: .mainQueue())
         }
         if accept && self.sticker != nil {
             nextForceAccept = false
@@ -115,7 +115,6 @@ class MediaAnimatedStickerView: ChatMediaContentView {
         }
         return true
     }
-    
     override func executeInteraction(_ isControl: Bool) {
         if let window = window as? Window {
             if let context = context, let peerId = parent?.id.peerId, let media = media as? TelegramMediaFile, !media.isEmojiAnimatedSticker, let reference = media.stickerReference {
@@ -135,10 +134,13 @@ class MediaAnimatedStickerView: ChatMediaContentView {
     
     func updateListeners() {
         if let window = window {
+            
             NotificationCenter.default.removeObserver(self)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didBecomeKeyNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSWindow.didResignKeyNotification, object: window)
             NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.boundsDidChangeNotification, object: self.enclosingScrollView?.contentView)
+            NotificationCenter.default.addObserver(self, selector: #selector(updatePlayerIfNeeded), name: NSView.frameDidChangeNotification, object: self.enclosingScrollView?.documentView)
+
         } else {
             removeNotificationListeners()
         }
@@ -211,7 +213,7 @@ class MediaAnimatedStickerView: ChatMediaContentView {
         }
         
         self.loadResourceDisposable.set((data |> map { resourceData -> Data? in
-            
+
             if resourceData.complete, let data = try? Data(contentsOf: URL(fileURLWithPath: resourceData.path), options: [.mappedIfSafe]) {
                 return data
             }
@@ -220,7 +222,7 @@ class MediaAnimatedStickerView: ChatMediaContentView {
             if let data = data, let file = file, let `self` = self {
                 let parameters = parameters as? ChatAnimatedStickerMediaLayoutParameters
                 let playPolicy: LottiePlayPolicy = parameters?.playPolicy ?? (file.isEmojiAnimatedSticker || !self.chatLoopAnimated ? (self.parameters == nil ? .framesCount(1) : .once) : .loop)
-                                
+
                 let maximumFps: Int = size.width < 200 && !file.isEmojiAnimatedSticker ? size.width <= 30 ? 24 : 30 : 60
                 let cache: ASCachePurpose = parameters?.cache ?? (size.width < 200 && size.width > 30 ? .temporaryLZ4(.thumb) : self.parent != nil ? .temporaryLZ4(.chat) : .none)
                 let fitzModifier = file.animatedEmojiFitzModifier
@@ -243,19 +245,28 @@ class MediaAnimatedStickerView: ChatMediaContentView {
                 }
             })
             self.thumbView.set(arguments: arguments)
-        } else {
-            self.thumbView.dispose()
         }
 
         fetchDisposable.set(fetchedMediaResource(mediaBox: context.account.postbox.mediaBox, reference: reference).start())
         stateDisposable.set((self.playerView.state |> deliverOnMainQueue).start(next: { [weak self] state in
             guard let `self` = self else { return }
+            
+            
             switch state {
             case .playing:
                 self.playerView.isHidden = false
                 self.thumbView.isHidden = true
-            default:
+            case .stoped:
                 self.playerView.isHidden = true
+                self.thumbView.isHidden = false
+                if let parameters = parameters as? ChatAnimatedStickerMediaLayoutParameters {
+                    if parameters.hidePlayer {
+                        self.playerView.isHidden = false
+                        self.thumbView.isHidden = true
+                    }
+                }
+            default:
+                self.playerView.isHidden = false
                 self.thumbView.isHidden = false
             }
         }))

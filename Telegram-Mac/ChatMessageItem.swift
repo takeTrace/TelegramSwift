@@ -190,8 +190,12 @@ class ChatMessageItem: ChatRowItem {
                     }
                 }
                 
+                let openInfo:(PeerId, Bool, MessageId?, ChatInitialAction?)->Void = { [weak chatInteraction] peerId, toChat, postId, initialAction in
+                    chatInteraction?.openInfo(peerId, toChat, postId, initialAction ?? .source(message.id))
+                }
                 
-                messageAttr = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text, context: context, fontSize: theme.fontSize, openInfo:chatInteraction.openInfo, botCommand:chatInteraction.sendPlainText, hashtag: context.sharedContext.bindings.globalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), mediaDuration: mediaDuration, timecode: { timecode in
+                
+                messageAttr = ChatMessageItem.applyMessageEntities(with: message.attributes, for: message.text, context: context, fontSize: theme.fontSize, openInfo:openInfo, botCommand:chatInteraction.sendPlainText, hashtag: chatInteraction.modalSearch, applyProxy: chatInteraction.applyProxy, textColor: theme.chat.textColor(isIncoming, entry.renderType == .bubble), linkColor: theme.chat.linkColor(isIncoming, entry.renderType == .bubble), monospacedPre: theme.chat.monospacedPreColor(isIncoming, entry.renderType == .bubble), monospacedCode: theme.chat.monospacedCodeColor(isIncoming, entry.renderType == .bubble), mediaDuration: mediaDuration, timecode: { timecode in
                     openSpecificTimecodeFromReply?(timecode)
                 }, openBank: chatInteraction.openBank).mutableCopy() as! NSMutableAttributedString
 
@@ -253,7 +257,7 @@ class ChatMessageItem: ChatRowItem {
             
             if let peer = message.peers[message.id.peerId] {
                 if peer is TelegramSecretChat {
-                    copy.detectLinks(type: .Links, context: context, color: theme.chat.linkColor(isIncoming, entry.renderType == .bubble))
+                    copy.detectLinks(type: [.Links, .Hashtags, .Mentions], context: context, color: theme.chat.linkColor(isIncoming, entry.renderType == .bubble))
                 }
             }
 
@@ -449,9 +453,10 @@ class ChatMessageItem: ChatRowItem {
                         items.append(ContextMenuItem(text, handler: {
                             if let strongSelf = self {
                                 let pb = NSPasteboard.general
+                                pb.clearContents()
                                 pb.declareTypes([.string], owner: strongSelf)
                                 var effectiveRange = strongSelf.textLayout.selectedRange.range
-                                let selectedText = strongSelf.textLayout.attributedString.attributedSubstring(from: strongSelf.textLayout.selectedRange.range)
+                                let selectedText = strongSelf.textLayout.attributedString.attributedSubstring(from: effectiveRange)
                                 let attribute = strongSelf.textLayout.attributedString.attribute(NSAttributedString.Key.link, at: strongSelf.textLayout.selectedRange.range.location, effectiveRange: &effectiveRange)
                                 if let attribute = attribute as? inAppLink {
                                     pb.setString(attribute.link.isEmpty ? selectedText.string : attribute.link, forType: .string)
@@ -468,6 +473,7 @@ class ChatMessageItem: ChatRowItem {
                         if let result = result, let strongSelf = self, !result {
                             if strongSelf.textLayout.selectedRange.hasSelectText {
                                 let pb = NSPasteboard.general
+                                pb.clearContents()
                                 pb.declareTypes([.string], owner: strongSelf)
                                 var effectiveRange = strongSelf.textLayout.selectedRange.range
                                 let selectedText = strongSelf.textLayout.attributedString.attributedSubstring(from: strongSelf.textLayout.selectedRange.range)
@@ -743,16 +749,16 @@ class ChatMessageItem: ChatRowItem {
                     }
                 }
             }
-            if let index = index {
-                let index = min(index, items.count)
-                items.insert(ContextMenuItem(L10n.textCopyText, handler: { [weak self] in
-                    if let string = self?.textLayout.attributedString {
-                        if !globalLinkExecutor.copyAttributedString(string) {
-                            copyToClipboard(string.string)
-                        }
+            
+            let insert = min(index ?? 0, items.count)
+            items.insert(ContextMenuItem(L10n.textCopyText, handler: { [weak self] in
+                if let string = self?.textLayout.attributedString {
+                    if !globalLinkExecutor.copyAttributedString(string) {
+                        copyToClipboard(string.string)
                     }
-                }), at: index)
-            }
+                }
+            }), at: insert)
+
             
             
             if let view = self?.view as? ChatRowView, let textView = view.selectableTextViews.first, let window = textView.window, index == nil {
@@ -799,7 +805,7 @@ class ChatMessageItem: ChatRowItem {
         return ChatMessageView.self
     }
     
-    static func applyMessageEntities(with attributes:[MessageAttribute], for text:String, context: AccountContext, fontSize: CGFloat, openInfo:@escaping (PeerId, Bool, MessageId?, ChatInitialAction?)->Void, botCommand:@escaping (String)->Void, hashtag:@escaping (String)->Void, applyProxy:@escaping (ProxyServerSettings)->Void, textColor: NSColor = theme.colors.text, linkColor: NSColor = theme.colors.link, monospacedPre:NSColor = theme.colors.monospacedPre, monospacedCode: NSColor = theme.colors.monospacedCode, mediaDuration: Double? = nil, timecode: @escaping(Double?)->Void = { _ in }, openBank: @escaping(String)->Void = { _ in }) -> NSAttributedString {
+    static func applyMessageEntities(with attributes:[MessageAttribute], for text:String, context: AccountContext, fontSize: CGFloat, openInfo:@escaping (PeerId, Bool, MessageId?, ChatInitialAction?)->Void, botCommand:@escaping (String)->Void = { _ in }, hashtag:@escaping (String)->Void = { _ in }, applyProxy:@escaping (ProxyServerSettings)->Void = { _ in }, textColor: NSColor = theme.colors.text, linkColor: NSColor = theme.colors.link, monospacedPre:NSColor = theme.colors.monospacedPre, monospacedCode: NSColor = theme.colors.monospacedCode, mediaDuration: Double? = nil, timecode: @escaping(Double?)->Void = { _ in }, openBank: @escaping(String)->Void = { _ in }) -> NSAttributedString {
         var entities: [MessageTextEntity] = []
         for attribute in attributes {
             if let attribute = attribute as? TextEntitiesMessageAttribute {
@@ -840,7 +846,7 @@ class ChatMessageItem: ChatRowItem {
                     nsString = text as NSString
                 }
                 
-                string.addAttribute(NSAttributedString.Key.link, value: inApp(for: url as NSString, context: context, openInfo: openInfo, hashtag: hashtag, command: botCommand,  applyProxy: applyProxy, confirm: true), range: range)
+                string.addAttribute(NSAttributedString.Key.link, value: inApp(for: url as NSString, context: context, openInfo: openInfo, hashtag: hashtag, command: botCommand,  applyProxy: applyProxy, confirm: nsString?.substring(with: range).trimmed != url), range: range)
             case .Bold:
                 if let fontAttribute = fontAttributes[range] {
                     fontAttributes[range] = fontAttribute.union(.bold)
@@ -888,7 +894,7 @@ class ChatMessageItem: ChatRowItem {
                 } else {
                     fontAttributes[range] = .monospace
                 }
-                string.addAttribute(.preformattedPre, value: 4.0, range: range)
+               // string.addAttribute(.preformattedPre, value: 4.0, range: range)
                 string.addAttribute(NSAttributedString.Key.foregroundColor, value: monospacedPre, range: range)
             case .Hashtag:
                 string.addAttribute(NSAttributedString.Key.foregroundColor, value: linkColor, range: range)

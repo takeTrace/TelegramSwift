@@ -19,6 +19,7 @@ struct GroupAccess {
     let isPublic:Bool
     let isCreator:Bool
     let canCreateInviteLink: Bool
+    let canReport: Bool
 }
 
 extension Peer {
@@ -30,9 +31,11 @@ extension Peer {
         var canAddMembers = false
         var isPublic = false
         var isCreator = false
+        var canReport = true
         if let group = self as? TelegramGroup {
             if case .creator = group.role {
                 isCreator = true
+                canReport = false
             }
             highlightAdmins = true
             switch group.role {
@@ -40,6 +43,7 @@ extension Peer {
                 canEditGroupInfo = true
                 canEditMembers = true
                 canAddMembers = true
+                canReport = false
             case .member:
                 break
             }
@@ -53,6 +57,7 @@ extension Peer {
             highlightAdmins = true
             isPublic = channel.username != nil
             isCreator = channel.flags.contains(.isCreator)
+            canReport = !channel.flags.contains(.isCreator) && channel.adminRights == nil
             if channel.hasPermission(.changeInfo) {
                 canEditGroupInfo = true
             }
@@ -70,14 +75,14 @@ extension Peer {
                 canCreateInviteLink = true
             }
         } else if let channel = self as? TelegramChannel {
-            if channel.hasPermission(.inviteMembers) {
+            if channel.hasPermission(.inviteMembers) && channel.adminRights != nil {
                 canCreateInviteLink = true
             }
         }
         
 
 
-        return GroupAccess(highlightAdmins: highlightAdmins, canEditGroupInfo: canEditGroupInfo, canEditMembers: canEditMembers, canAddMembers: canAddMembers, isPublic: isPublic, isCreator: isCreator, canCreateInviteLink: canCreateInviteLink)
+        return GroupAccess(highlightAdmins: highlightAdmins, canEditGroupInfo: canEditGroupInfo, canEditMembers: canEditMembers, canAddMembers: canAddMembers, isPublic: isPublic, isCreator: isCreator, canCreateInviteLink: canCreateInviteLink, canReport: canReport)
     }
     
     var canInviteUsers:Bool {
@@ -118,7 +123,9 @@ extension TelegramGroup {
 extension TelegramChannel {
     func canRemoveParticipant(_ participant: ChannelParticipant, accountId:PeerId) -> Bool {
         let hasRight = hasPermission(.banMembers)
-        
+        if accountId == participant.peerId {
+            return false
+        }
         switch participant {
         case let .member(_, _,  adminInfo, _, _):
             if let adminInfo = adminInfo {

@@ -169,7 +169,6 @@ private final class LocationMapView : View {
             locationPinView.change(opacity: loading ? 0 : 1, animated: animated)
             locationPinView.updateState(pickState, animated: animated)
             expandButton.set(text: L10n.locationSendShowNearby, for: .Normal)
-            //NSMakeRect(0, frame.height - 50 - expandContainer.frame.height, frame.width, 50)
             tableView.change(size: NSMakeSize(frame.width, 60), animated: animated, timingFunction: CAMediaTimingFunctionName.spring)
             tableView.change(pos: NSMakePoint(0, frame.height - 60 - (hasExpand ? expandContainer.frame.height : 0)), animated: animated, duration: duration, timingFunction: timingFunction)
             mapY = header.frame.height
@@ -189,7 +188,6 @@ private final class LocationMapView : View {
         
         
         mapView._change(pos: NSMakePoint(0, mapY), animated: animated, duration: duration, timingFunction: timingFunction)
-        //pinPoint.midY - locationPinView.frame.height
         let pinPoint = mapView.focus(NSMakeSize(locationPinView.frame.width, 4))
         locationPinView.change(pos: NSMakePoint(pinPoint.minX, pinPoint.midY - locationPinView.frame.height), animated: animated, duration: 0.2, timingFunction: CAMediaTimingFunctionName.linear)
 
@@ -330,7 +328,7 @@ private enum MapItemEntry : TableItemListNodeEntry {
                 arguments.searchVenues(state.request)
             }, { state in
                 arguments.searchVenues(state.request)
-            }), inset: NSEdgeInsets(left:10,right:10, top: 10, bottom: 10))
+            }), inset: NSEdgeInsets(left: 10,right: 10, top: 10, bottom: 10))
         case let .currentLocation(_, state):
             return LocationSendCurrentItem(initialSize, stableId: stableId, state: state, action: {
                 arguments.sendCurrent()
@@ -500,6 +498,10 @@ class LocationModalController: ModalViewController {
         }, with: self, for: .leftMouseDragged, priority: .modal)
     }
     
+    override func close(animationType: ModalAnimationCloseBehaviour = .common) {
+        super.close(animationType: animationType)
+    }
+
     private func sendLocation(_ media: TelegramMediaMap? = nil) {
         sendDisposable.set((statePromise.get() |> deliverOnMainQueue).start(next: { [weak self] state in
             switch state {
@@ -583,11 +585,11 @@ class LocationModalController: ModalViewController {
                         return first |> then(requestChatContextResults(account: context.account, botId: botId, peerId: peerId, query: query, location: .single((location.coordinate.latitude, location.coordinate.longitude)), offset: "")
                             |> `catch` { _ in return .complete() }
                             |> deliverOnPrepareQueue |> map { result in
-                                var value = result
+                                var value = result?.results
                                 if let result = result {
-                                    cachedData[query] = result
+                                    cachedData[query] = result.results
                                 }
-                                value = previousResult.modify {_ in result}
+                                value = previousResult.modify { _ in result?.results }
                                 
                                 return (value, location.location, false, !query.isEmpty)
                             })

@@ -126,35 +126,15 @@ public class UpdateTransition<T> {
     public let deleted:[Int]
     public let animateVisibleOnly: Bool
     public init(deleted:[Int], inserted:[(Int,T)], updated:[(Int,T)], animateVisibleOnly: Bool = true) {
-        
-
-  
-//        for d_idx in stride(from: deleted.count - 1, to: -1, by: -1) {
-//            in_loop: for i_idx in stride(from: inserted.count - 1, to: -1, by: -1) {
-//                if deleted[d_idx] == inserted[i_idx].0 {
-//                    if !updated.isEmpty {
-//                        u_loop: for u_udx in 0 ..< updated.count {
-//                            assert(updated[u_udx].0 != inserted[i_idx].0)
-//                            if updated[u_udx].0 > inserted[i_idx].0 {
-//                                updated.insert(inserted[i_idx], at: u_udx)
-//                                break u_loop
-//                            }
-//                        }
-//                    } else {
-//                        updated.append(inserted[i_idx])
-//                    }
-//
-//                    deleted.remove(at: d_idx)
-//                    inserted.remove(at: i_idx)
-//                    break in_loop
-//                }
-//            }
-//        }
-        
         self.inserted = inserted
         self.updated = updated
         self.deleted = deleted
         self.animateVisibleOnly = animateVisibleOnly
+    }
+    
+    deinit {
+        var bp:Int = 0
+        bp += 1
     }
     
     public var isEmpty:Bool {
@@ -471,33 +451,63 @@ class TGFlipableTableView : NSTableView, CALayerDelegate {
     }
 
     private var beforeRange: NSRange = NSMakeRange(NSNotFound, 0)
+    private var offsetOfStartItem: NSPoint = .zero
+    private var mouseDown: Bool = false
+    override func mouseDragged(with event: NSEvent) {
+        super.mouseDragged(with: event)
+        
+        if let resortController = table?.resortController, beforeRange.length > 0, mouseDown {
+            if resortController.resortRange.indexIn(beforeRange.location) {
+                let point = self.convert(event.locationInWindow, from: nil)
+                let afterRange = self.rows(in: NSMakeRect(point.x, point.y, 1, 1))
+                if afterRange != beforeRange {
+                    self.table?.startResorting(beforeRange, point.offsetBy(dx: -offsetOfStartItem.x, dy: -offsetOfStartItem.y))
+                }
+            }
+        }
+    }
     
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1 {
+            mouseDown = true
             let point = self.convert(event.locationInWindow, from: nil)
             let beforeRange = self.rows(in: NSMakeRect(point.x, point.y, 1, 1))
+            self.beforeRange = beforeRange
             if beforeRange.length > 0 {
-                self.beforeRange = beforeRange
-                if let resortController = table?.resortController, beforeRange.length > 0 {
+                if let resortController = table?.resortController{
                     if resortController.resortRange.indexIn(beforeRange.location) {
-                        longDisposable.set((Signal<Void, NoError>.single(Void()) |> delay(resortController.startTimeout, queue: Queue.mainQueue())).start(next: { [weak self] in
-                            let currentEvent = NSApp.currentEvent
-                            guard let `self` = self, let ev = currentEvent, ev.type == .leftMouseDown || ev.type == .leftMouseDragged || ev.type == .pressure else {return}
-                            let point = self.convert(ev.locationInWindow, from: nil)
-                            let afterRange = self.rows(in: NSMakeRect(point.x, point.y, 1, 1))
-                            if afterRange == beforeRange {
-                                self.table?.startResorting()
-                            }
-                        }))
+                        self.offsetOfStartItem = point
                     } else if let table = table, !table.alwaysOpenRowsOnMouseUp {
                         sdelegate?.selectRow(index: beforeRange.location)
                     }
-                    
                 } else if let table = table, !table.alwaysOpenRowsOnMouseUp {
                     sdelegate?.selectRow(index: beforeRange.location)
                 }
             }
         }
+    }
+    
+    override func mouseUp(with event: NSEvent) {
+        longDisposable.set(nil)
+        let point = self.convert(event.locationInWindow, from: nil)
+        let range = self.rows(in: NSMakeRect(point.x, point.y, 1, 1));
+        if range.length > 0, let table = table, mouseDown {
+            mouseDown = false
+            if let controller = self.table?.resortController {
+                if !controller.resortRange.indexIn(range.location) {
+                    if controller.resortRow == nil, beforeRange.location == range.location && table.alwaysOpenRowsOnMouseUp {
+                        sdelegate?.selectRow(index: range.location)
+                    }
+                    return
+                }
+                if range.length > 0, beforeRange.location == range.location {
+                    sdelegate?.selectRow(index: range.location)
+                }
+            } else if table.alwaysOpenRowsOnMouseUp, beforeRange.location == range.location {
+                sdelegate?.selectRow(index: range.location)
+            }
+        }
+        mouseDown = false
     }
     
     
@@ -512,7 +522,7 @@ class TGFlipableTableView : NSTableView, CALayerDelegate {
         if newSize.width > 0 || newSize.height > 0 {
             super.setFrameSize(newSize)
             
-            if oldWidth != frame.width {
+            if oldWidth != frame.width, newSize.width > 0 && newSize.height > 0 {
                 if let table = table {
                     table.layoutIfNeeded(with: table.visibleRows(), oldWidth: oldWidth)
                 }
@@ -534,8 +544,8 @@ class TGFlipableTableView : NSTableView, CALayerDelegate {
     
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        if liveWidth  != frame.width {
-            liveWidth = 0
+        if liveWidth != frame.width {
+            liveWidth = frame.width
             table?.layoutItems()
         }
     }
@@ -545,26 +555,7 @@ class TGFlipableTableView : NSTableView, CALayerDelegate {
     }
     
     
-    override func mouseUp(with event: NSEvent) {
-        longDisposable.set(nil)
-        let point = self.convert(event.locationInWindow, from: nil)
-        let range  = self.rows(in: NSMakeRect(point.x, point.y, 1, 1));
-        if range.length > 0 {
-            if let controller = self.table?.resortController {
-                if !controller.resortRange.indexIn(range.location) {
-                    if let table = table, table.alwaysOpenRowsOnMouseUp, beforeRange.location == range.location {
-                        sdelegate?.selectRow(index: range.location)
-                    }
-                    return
-                }
-                if range.length > 0, beforeRange.location == range.location {
-                    sdelegate?.selectRow(index: range.location)
-                }
-            } else if let table = table, table.alwaysOpenRowsOnMouseUp, beforeRange.location == range.location {
-                sdelegate?.selectRow(index: range.location)
-            }
-        }
-    }
+   
 
 }
 
@@ -619,6 +610,11 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
 
     var list:[TableRowItem] = [TableRowItem]();
     var tableView:TGFlipableTableView
+    
+    public var view: NSTableView {
+        return tableView
+    }
+    
     weak public var delegate:TableViewDelegate?
     private var trackingArea:NSTrackingArea?
     private var listhash:[AnyHashable:TableRowItem] = [AnyHashable:TableRowItem]();
@@ -652,6 +648,11 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     
     public var emptyChecker: (([TableRowItem]) -> Bool)? = nil
     
+    public var updatedItems:(([TableRowItem])->Void)? {
+        didSet {
+            updatedItems?(self.list)
+        }
+    }
     
     public var beforeSetupItem:((TableRowView, TableRowItem)->Void)?
     public var afterSetupItem:((TableRowView, TableRowItem)->Void)?
@@ -880,6 +881,10 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     
     
     func layoutIfNeeded(with range:NSRange, oldWidth:CGFloat) {
+        
+        
+        let visibleItems = self.visibleItems()
+        
         for i in range.min ..< range.max {
             let item = self.item(at: i)
             let before = item.heightValue
@@ -889,6 +894,9 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                 reloadData(row: i, animated: false)
                 noteHeightOfRow(i, false)
             }
+        }
+        if !tableView.inLiveResize && oldWidth != 0 {
+            saveScrollState(visibleItems)
         }
     }
     
@@ -1103,17 +1111,19 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     public func layouItemsOnNextTransition() {
         needsLayouItemsOnNextTransition = true
     }
-    
     public func layoutItems() {
 
         let visibleItems = self.visibleItems()
         
         beginTableUpdates()
         enumerateItems { item in
-            _ = item.makeSize(frame.width, oldWidth: item.width)
-            reloadData(row: item.index, animated: false)
-            NSAnimationContext.current.duration = 0.0
-            tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: item.index))
+            if item.width != frame.width {
+                _ = item.makeSize(frame.width, oldWidth: item.width)
+                reloadData(row: item.index, animated: false)
+                NSAnimationContext.current.duration = 0.0
+                NSAnimationContext.current.timingFunction = nil
+                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: item.index))
+            }
             return true
         }
         
@@ -1125,7 +1135,8 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     }
     
     private func saveScrollState(_ visibleItems: [(TableRowItem,CGFloat,CGFloat)]) -> Void {
-        if !visibleItems.isEmpty, clipView.bounds.minY > 0 {
+        //, clipView.bounds.minY > 0
+        if !visibleItems.isEmpty, documentOffset.y > 0 {
             var nrect:NSRect = NSZeroRect
             
             let strideTo:StrideTo<Int> = stride(from: visibleItems.count - 1, to: -1, by: -1)
@@ -1163,14 +1174,15 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     public func updateStickAfterScroll(_ animated: Bool) -> Void {
         let range = self.visibleRows()
         
-        if let stickClass = stickClass {
+        if let stickClass = stickClass, !updating {
          //   if documentSize.height > frame.height {
                 
                 let flipped = tableView.isFlipped
 
                 
                 var index:Int = flipped ? range.location : range.location + range.length - 1
-                
+            
+            
                 
                 let scrollInset = self.documentOffset.y + (flipped ? 0 : frame.height)
                 var item:TableRowItem? = optionalItem(at: index)
@@ -1220,6 +1232,9 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                         }
                     }
                     
+                    if someItem.singletonItem {
+                        currentStick = someItem
+                    }
                     
                     if stickView?.item != item {
                         stickView?.set(item: someItem, animated: animated)
@@ -1235,9 +1250,10 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                     stickItem = currentStick ?? someItem
                     
                     if let stickView = stickView {
-                        if subviews.last != stickView {
-                            stickView.removeFromSuperview()
-                            addSubview(stickView)
+                        let scrollerIndex = subviews.firstIndex(where: { $0 is NSScroller })
+                        let stickViewIndex = subviews.firstIndex(where: { $0 is TableStickView })
+                        if let scrollerIndex = scrollerIndex, stickViewIndex == nil || stickViewIndex! > scrollerIndex {
+                            addSubview(stickView, positioned: .below, relativeTo: subviews[scrollerIndex])
                         }
                     }
                     
@@ -1261,17 +1277,20 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                         if yTopOffset <= -rect.height {
                             yTopOffset = 0
                         }
-                        
+                        if scrollInset <= 0, item.singletonItem {
+                            yTopOffset = abs(scrollInset)
+                        }
                         stickView.change(pos: NSMakePoint(0, yTopOffset), animated: animated)
                         stickView.header = abs(dif) <= item.heightValue
 
                         if !firstTime {
-                            let rows:[Int] = [tableView.row(at: NSMakePoint(0, scrollInset - stickView.frame.height)), tableView.row(at: NSMakePoint(0, scrollInset))]
+                            let rows:[Int] = [tableView.row(at: NSMakePoint(0, min(scrollInset - stickView.frame.height, documentSize.height - stickView.frame.height))), tableView.row(at: NSMakePoint(0, scrollInset))]
                             var applied: Bool = false
                             for row in rows {
                                 let row = min(max(0, row), list.count - 1)
                                 if let dateItem = self.item(at: row) as? TableStickItem, let view = dateItem.view as? TableStickView {
-                                    view.updateIsVisible(yTopOffset < 0 && documentOffset.y > 0, animated: false)
+//                                    NSLog("\(yTopOffset < 0 && documentOffset.y > 0), \(yTopOffset)")
+                                    view.updateIsVisible(yTopOffset < 0 , animated: false)
                                     applied = true
                                 }
                             }
@@ -1301,8 +1320,9 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                         }
                         
                         if tableView.isFlipped {
-                            
-                            stickView.isHidden = documentOffset.y <= 0// && !stickView.isAlwaysUp
+                            stickView.isHidden = documentOffset.y <= 0 && !item.singletonItem// && !stickView.isAlwaysUp
+                        } else {
+                            stickView.isHidden = documentSize.height <= frame.height
                         }
 
                         stickTimeoutDisposable.set((Signal<Void, NoError>.single(Void()) |> delay(2.0, queue: Queue.mainQueue())).start(next: { [weak stickView] in
@@ -1421,7 +1441,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     
     public func index(of:TableRowItem) -> Int? {
         if let it = self.listhash[of.stableId] {
-            return self.list.index(of: it)
+            return self.list.firstIndex(of: it)
         }
         return nil
     }
@@ -1435,20 +1455,22 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         return nil
     }
     
-    fileprivate func startResorting() {
+    fileprivate func startResorting(_ range: NSRange, _ offset: CGPoint) {
         guard let window = _window else {return}
         
         let point = tableView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        let range = tableView.rows(in: NSMakeRect(point.x, point.y, 1, 1));
         if range.length > 0, let controller = resortController, controller.canResort(range.location), let view = viewNecessary(at: range.location) {
             controller.resortRow = range.location
             controller.currentHoleIndex = range.location
             controller.resortView = view
-            controller.startLocation = point
-            controller.startRowLocation = view.frame.origin
+            controller.startLocation = NSMakePoint(round(point.y), round(point.y))
+            controller.startRowLocation = view.frame.origin.offsetBy(dx: 0, dy: round(offset.y))
             controller.start(range.location)
    
             view.frame = convert(view.frame, from: view.superview)
+            
+            
+            
             addSubview(view)
             view.isHidden = false
             window.set(mouseHandler: { [weak self] event -> KeyHandlerResult in
@@ -1456,6 +1478,8 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                 self?.stopResorting()
                 return .invoked
             }, with: self, for: .leftMouseUp, priority: .modal)
+            
+            var first: Bool = true
             
             window.set(mouseHandler: { [weak self] event -> KeyHandlerResult in
                 if let controller = self?.resortController, let view = controller.resortView, let `self` = self {
@@ -1476,7 +1500,12 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                     
                     var newPoint = NSMakePoint(view.frame.minX, max(controller.startRowLocation.y - difference, 0))
                     newPoint.y -= self.documentOffset.y //self.convert(newPoint, from: self.tableView)
+                    newPoint = NSMakePoint(round(newPoint.x), round(newPoint.y))
+                    if first {
+                        view.layer?.animatePosition(from: NSMakePoint(0, view.frame.minY - newPoint.y), to: .zero, duration: 0.2, timingFunction: .spring, removeOnCompletion: true, additive: true)
+                    }
                     view.setFrameOrigin(newPoint)
+                    first = false
                     self.updateMovableItem(point)
                     return .invoked
                 } else {
@@ -1617,7 +1646,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         item._index = at
         let animation = animation != .none ? item.animatable ? animation : .none : .none
         NSAnimationContext.current.duration = animation != .none ? 0.2 : 0.0
-        
+        NSAnimationContext.current.timingFunction = animation == .none ? nil : CAMediaTimingFunction(name: .easeOut)
         if(redraw) {
             self.tableView.insertRows(at: IndexSet(integer: at), withAnimation: animation)
             self.tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: at))
@@ -1663,6 +1692,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     public func noteHeightOfRow(_ row:Int, _ animated:Bool = true) {
         if !animated {
             NSAnimationContext.current.duration = 0
+            NSAnimationContext.current.timingFunction = nil
         }
         tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
     }
@@ -1675,9 +1705,15 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
             if view.isKind(of: item.viewClass()) && !presentAsNew {
                 if view.frame.height != item.heightValue {
                     NSAnimationContext.current.duration = animated ? 0.2 : 0.0
+                    NSAnimationContext.current.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
                 }
-                view.change(size: NSMakeSize(frame.width, item.heightValue), animated: animated)
+                
+                let height:CGFloat = item.heightValue
+                let width:CGFloat = self is HorizontalTableView ? item.width : frame.width
+
+                
+                view.change(size: NSMakeSize(width, height), animated: animated)
                 view.set(item: item, animated: animated)
             } else {
                 self.tableView.removeRows(at: IndexSet(integer: row), withAnimation: !animated ? .none : options)
@@ -1685,6 +1721,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
             }
         } else {
             NSAnimationContext.current.duration = 0.0
+            NSAnimationContext.current.timingFunction = nil
             tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
         }
         //self.moveItem(from: row, to: row)
@@ -1705,7 +1742,8 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         var item:TableRowItem = self.item(at:from);
         let animation: NSTableView.AnimationOptions = animation != .none ? item.animatable ? animation : .none : .none
         NSAnimationContext.current.duration = animation != .none ? NSAnimationContext.current.duration : 0.0
-       
+        NSAnimationContext.current.timingFunction = animation != .none ? CAMediaTimingFunction(name: .easeOut) : nil
+
         if let change = changeItem {
             assert(change.stableId == item.stableId)
             change.table = self
@@ -1767,6 +1805,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
 
             let animation: NSTableView.AnimationOptions = animation != .none ? item.animatable ? animation : .none : .none
             NSAnimationContext.current.duration = animation == .none ? 0.0 : 0.2
+            NSAnimationContext.current.timingFunction = animation == .none ? nil : CAMediaTimingFunction(name: .easeOut)
 
             if(redraw) {
                 self.tableView.removeRows(at: IndexSet(integer:at), withAnimation: animation != .none ? .effectFade : .none)
@@ -2051,9 +2090,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                         self.cancelSelection();
                     }
                     self.selectedhash = item.stableId
-                    if highlightedItem() != nil {
-                        _ = highlight(item: item)
-                    }
+                    self.cancelHighlight()
                     item.prepare(true)
                     self.reloadData(row:item.index)
                     if notify {
@@ -2139,7 +2176,11 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         var view: NSView? = item.isUniqueView ? nil : self.tableView.makeView(withIdentifier: NSUserInterfaceItemIdentifier(rawValue: identifier), owner: self.tableView)
 
         if(view == nil) {
-            view = makeView(at: item.index)
+            if let item = item as? TableStickItem, item.singletonItem {
+                view = TableRowView(frame: NSMakeRect(0, 0, frame.width, item.heightValue))
+            } else {
+                view = makeView(at: item.index)
+            }
             view?.identifier = NSUserInterfaceItemIdentifier(rawValue: identifier)
         }
         if view!.frame.height != item.heightValue {
@@ -2293,22 +2334,14 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         assertOnMainThread()
         assert(!updating)
         
+        
         if isSetTransitionToQueue() || (!self.queuedTransitions.isEmpty && !forceApply) {
             self.queuedTransitions.append(transition)
             return
         }
         
         let oldEmpty = self.isEmpty
-        
-//        for subview in tableView.subviews.reversed() {
-//            if let subview = subview as? NSTableRowView {
-//                if tableView.row(for: subview) == -1 {
-//                    subview.removeFromSuperview()
-//                }
-//            }
-//        }
 
-        
         self.beginUpdates()
         
         let documentOffset = self.documentOffset
@@ -2499,6 +2532,8 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         self.endUpdates()
         
         
+       self.updatedItems?(self.list)
+        
 //        for subview in self.tableView.subviews.reversed() {
 //            if self.tableView.row(for: subview) == -1 {
 //                subview.removeFromSuperview()
@@ -2533,6 +2568,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
         
         first = false
         performScrollEvent(transition.animated)
+        updateStickAfterScroll(transition.animated)
     }
     
     public func updateEmpties(animated: Bool = false) {
@@ -2928,6 +2964,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
                     focus.action?(view.interactableView)
                 }
             }
+            completion(true)
         }
 
     }
@@ -2939,7 +2976,7 @@ open class TableView: ScrollView, NSTableViewDelegate,NSTableViewDataSource,Sele
     
         
         //updateStickAfterScroll(false)
-        if oldWidth != newSize.width {
+        if oldWidth != newSize.width, !inLiveResize && newSize.width > 0 && newSize.height > 0 {
             saveScrollState(visible)
         }
     }

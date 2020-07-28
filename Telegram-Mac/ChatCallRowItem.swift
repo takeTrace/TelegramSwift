@@ -33,7 +33,7 @@ class ChatCallRowItem: ChatRowItem {
         outgoing = !message.flags.contains(.Incoming)
         headerLayout = TextViewLayout(.initialize(string: outgoing ? tr(L10n.chatCallOutgoing) : tr(L10n.chatCallIncoming), color: theme.chat.textColor(isIncoming, object.renderType == .bubble), font: .medium(.text)), maximumNumberOfLines: 1)
         switch action.action {
-        case let .phoneCall(_, reason, duration):
+        case let .phoneCall(_, reason, duration, _):
             let attr = NSMutableAttributedString()
             
            
@@ -126,7 +126,7 @@ private class ChatCallRowView : ChatRowView {
         if let item = item as? ChatCallRowItem {
             
             fallbackControl.set(image: theme.chat.chatCallFallbackIcon(item), for: .Normal)
-            fallbackControl.sizeToFit()
+            _ = fallbackControl.sizeToFit()
             
             imageView.image = theme.chat.chatCallIcon(item)
             imageView.sizeToFit()

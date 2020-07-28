@@ -200,6 +200,9 @@ final class AccountContextBindings {
     #endif
 }
 
+private var lastTimeFreeSpaceNotified: TimeInterval?
+
+
 final class AccountContext {
     let sharedContext: SharedAccountContext
     let account: Account
@@ -263,11 +266,25 @@ final class AccountContext {
     private let actualizeCloudTheme = MetaDisposable()
     private let applyThemeDisposable = MetaDisposable()
     private let cloudThemeObserver = MetaDisposable()
+    private let freeSpaceDisposable = MetaDisposable()
     private let prefDisposable = DisposableSet()
     private let _limitConfiguration: Atomic<LimitsConfiguration> = Atomic(value: LimitsConfiguration.defaultValue)
     
     var limitConfiguration: LimitsConfiguration {
         return _limitConfiguration.with { $0 }
+    }
+    
+    private let _appConfiguration: Atomic<AppConfiguration> = Atomic(value: AppConfiguration.defaultValue)
+    
+    var appConfiguration: AppConfiguration {
+        return _appConfiguration.with { $0 }
+    }
+    
+    
+    private let isKeyWindowValue: ValuePromise<Bool> = ValuePromise(ignoreRepeated: true)
+    
+    var isKeyWindow: Signal<Bool, NoError> {
+        return isKeyWindowValue.get() |> deliverOnMainQueue
     }
     
     private let _autoplayMedia: Atomic<AutoplayMediaPreferences> = Atomic(value: AutoplayMediaPreferences.defaultSettings)
@@ -279,6 +296,7 @@ final class AccountContext {
 
     var isInGlobalSearch: Bool = false
     
+    
     private let _contentSettings: Atomic<ContentSettings> = Atomic(value: ContentSettings.default)
     
     var contentSettings: ContentSettings {
@@ -288,6 +306,8 @@ final class AccountContext {
    // public let tonContext: StoredTonContext!
     
     public var closeFolderFirst: Bool = false
+    
+    private let preloadGifsDisposable = MetaDisposable()
     
     //, tonContext: StoredTonContext?
     init(sharedContext: SharedAccountContext, window: Window, account: Account) {
@@ -310,6 +330,42 @@ final class AccountContext {
         prefDisposable.add(account.postbox.preferencesView(keys: [PreferencesKeys.limitsConfiguration]).start(next: { view in
             _ = limitConfiguration.swap(view.values[PreferencesKeys.limitsConfiguration] as? LimitsConfiguration ?? LimitsConfiguration.defaultValue)
         }))
+        let preloadGifsDisposable = self.preloadGifsDisposable
+        let appConfiguration = _appConfiguration
+        prefDisposable.add(account.postbox.preferencesView(keys: [PreferencesKeys.appConfiguration]).start(next: { view in
+            let configuration = view.values[PreferencesKeys.appConfiguration] as? AppConfiguration ?? AppConfiguration.defaultValue
+            _ = appConfiguration.swap(configuration)
+            
+            
+        }))
+        
+        #if !SHARE
+        let signal:Signal<Void, NoError> = Signal { subscriber in
+            
+            let signal: Signal<Never, NoError> = account.postbox.transaction {
+                return $0.getPreferencesEntry(key: PreferencesKeys.appConfiguration) as? AppConfiguration ?? AppConfiguration.defaultValue
+            } |> mapToSignal { configuration in
+                let value = GIFKeyboardConfiguration.with(appConfiguration: configuration)
+                var signals = value.emojis.map {
+                    searchGifs(account: account, query: $0)
+                }
+                signals.insert(searchGifs(account: account, query: ""), at: 0)
+                return combineLatest(signals) |> ignoreValues
+            }
+            
+            let disposable = signal.start(completed: {
+                subscriber.putCompletion()
+            })
+            
+            return ActionDisposable {
+                disposable.dispose()
+            }
+        }
+        
+        let updated = (signal |> then(.complete() |> suspendAwareDelay(20.0 * 60.0, queue: Queue.concurrentDefaultQueue()))) |> restart
+        preloadGifsDisposable.set(updated.start())
+        
+        #endif
         
         let autoplayMedia = _autoplayMedia
         prefDisposable.add(account.postbox.preferencesView(keys: [ApplicationSpecificPreferencesKeys.autoplayMedia]).start(next: { view in
@@ -325,13 +381,13 @@ final class AccountContext {
         globalPeerHandler.set(.single(nil))
         
         if account.network.globalTime > 0 {
-            timeDifference = account.network.globalTime - Date().timeIntervalSince1970
+            timeDifference = floor(account.network.globalTime - Date().timeIntervalSince1970)
         }
         
         updateDifferenceDisposable.set((Signal<Void, NoError>.single(Void())
             |> delay(5, queue: Queue.mainQueue()) |> restart).start(next: { [weak self, weak account] in
                 if let account = account, account.network.globalTime > 0 {
-                    self?.timeDifference = account.network.globalTime - Date().timeIntervalSince1970
+                    self?.timeDifference = floor(account.network.globalTime - Date().timeIntervalSince1970)
                 }
         }))
         
@@ -355,8 +411,47 @@ final class AccountContext {
         }))
         
         
+        NotificationCenter.default.addObserver(self, selector: #selector(updateKeyWindow), name: NSWindow.didBecomeKeyNotification, object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateKeyWindow), name: NSWindow.didResignKeyNotification, object: window)
+        
+        
+        #if !SHARE
+        var freeSpaceSignal:Signal<UInt64?, NoError> = Signal { subscriber in
+            
+            subscriber.putNext(freeSystemGygabytes())
+            subscriber.putCompletion()
+            
+            return ActionDisposable {
+                
+        }
+        } |> runOn(.concurrentDefaultQueue())
+        
+        freeSpaceSignal = (freeSpaceSignal |> then(.complete() |> suspendAwareDelay(60.0 * 30, queue: Queue.concurrentDefaultQueue()))) |> restart
+        
+        
+        let isLocked = (NSApp.delegate as? AppDelegate)?.passlock ?? .single(false)
+        
+        
+        freeSpaceDisposable.set(combineLatest(queue: .mainQueue(), freeSpaceSignal, isKeyWindow, isLocked).start(next: { [weak self] space, isKeyWindow, locked in
+            
+            
+            var limit: UInt64 = 5
+            
+            guard let `self` = self, isKeyWindow, !locked, let space = space, space < limit else {
+                return
+            }
+            if lastTimeFreeSpaceNotified == nil || (lastTimeFreeSpaceNotified! + 60.0 * 60.0 * 3 < Date().timeIntervalSince1970) {
+                lastTimeFreeSpaceNotified = Date().timeIntervalSince1970
+                showOutOfMemoryWarning(window, freeSpace: space, context: self)
+            }
+            
+        }))
+        #endif
     }
     
+    @objc private func updateKeyWindow() {
+        self.isKeyWindowValue.set(window.isKeyWindow)
+    }
     
     private func updateTheme(_ update: ApplyThemeUpdate) {
         switch update {
@@ -413,7 +508,9 @@ final class AccountContext {
         actualizeCloudTheme.dispose()
         applyThemeDisposable.dispose()
         cloudThemeObserver.dispose()
-        
+        preloadGifsDisposable.dispose()
+        freeSpaceDisposable.dispose()
+        NotificationCenter.default.removeObserver(self)
         #if !SHARE
       //  self.walletPasscodeTimeoutContext.clear()
         self.diceCache.cleanup()

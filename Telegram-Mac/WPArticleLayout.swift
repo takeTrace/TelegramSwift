@@ -188,16 +188,18 @@ class WPArticleLayout: WPLayout {
                 case let .wallpaper(_, _, preview):
                     switch preview {
                     case let .slug(_, settings):
-                        var patternIntensity: CGFloat = 0.5
-                        
-                        let color = settings.color ?? NSColor(rgb: 0xd6e2ee, alpha: 0.5).argb
-                        if let intensity = settings.intensity {
-                            patternIntensity = CGFloat(intensity) / 100.0
-                        }
-                        if let bottomColor = settings.bottomColor {
-                            emptyColor = .gradient(top: NSColor(argb: color).withAlphaComponent(patternIntensity), bottom: NSColor(rgb: bottomColor).withAlphaComponent(patternIntensity), rotation: settings.rotation)
-                        } else {
-                            emptyColor = .color(NSColor(argb: color))
+                        if settings.color != nil {
+                            var patternIntensity: CGFloat = 0.5
+                            
+                            let color = settings.color ?? NSColor(rgb: 0xd6e2ee, alpha: 0.5).argb
+                            if let intensity = settings.intensity {
+                                patternIntensity = CGFloat(intensity) / 100.0
+                            }
+                            if let bottomColor = settings.bottomColor {
+                                emptyColor = .gradient(top: NSColor(argb: color).withAlphaComponent(patternIntensity), bottom: NSColor(rgb: bottomColor).withAlphaComponent(patternIntensity), rotation: settings.rotation)
+                            } else {
+                                emptyColor = .color(NSColor(argb: color))
+                            }
                         }
                     case .color:
                         isColor = true
@@ -232,7 +234,7 @@ class WPArticleLayout: WPLayout {
             } else {
                 if let _ = imageSize {
                     contrainedImageSize = NSMakeSize(54, 54)
-                    textLayout?.cutout = TextViewCutout(position: .TopRight, size: NSMakeSize(contrainedImageSize.width + 16, contrainedImageSize.height + 10))
+                    textLayout?.cutout = TextViewCutout(topRight: NSMakeSize(contrainedImageSize.width + 16, contrainedImageSize.height + 10))
                 }
             }
             
